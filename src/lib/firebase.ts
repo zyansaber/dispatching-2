@@ -27,7 +27,7 @@ const parseSubmitTime = (raw?: string): number => {
   let [, dd, mm, yyyy, hh, min, ss = "0", ap] = m;
   let H = parseInt(hh, 10);
   const D = parseInt(dd, 10);
-  const M = parseInt(mm, 10) - 1;
+  const M = parseInt(mm, 10) - 1; // 0-based month
   const Y = parseInt(yyyy, 10);
 
   if (ap) {
@@ -170,7 +170,7 @@ export const processDispatchData = (
   const ct = parseSubmitTime(entries[current].submitTime);
   return ct > lt ? current : latest;
 });
-chassisToReallocatedTo.set(chassisNumber, entries[latestEntryId].reallocatedTo);
+      chassisToReallocatedTo.set(chassisNumber, entries[latestEntryId].reallocatedTo);
     }
   });
 
@@ -194,19 +194,11 @@ chassisToReallocatedTo.set(chassisNumber, entries[latestEntryId].reallocatedTo);
   return processed;
 };
 
-const isSnowyStock = (entry: ProcessedDispatchEntry, chassisToReallocatedTo: Map<string, string>) => {
-  const reallocatedTo = chassisToReallocatedTo.get(entry["Chassis No"]);
-  
-  // If Reallocation To is "Snowy Stock", it's considered Snowy Stock
-  if (reallocatedTo === "Snowy Stock") {
-    return true;
-  }
-  
-  // Original logic: Scheduled Dealer is "Snowy Stock" with OK checks and no reallocation or reallocation to Snowy Stock
-  return entry["Scheduled Dealer"] === "Snowy Stock" &&
-         entry.Statuscheck === "OK" &&
-         entry.DealerCheck === "OK" &&
-         (!reallocatedTo || reallocatedTo.trim() === "");
+const isSnowyStock = (entry: any, chassisToReallocatedTo: Map<string, string>) => {
+  const reallocatedTo = (chassisToReallocatedTo.get(entry["Chassis No"]) ?? "").trim();
+  if (reallocatedTo.toLowerCase() === "snowy stock") return true;
+  const scheduledDealer = (entry["Scheduled Dealer"] ?? entry.regentProduction ?? "").trim();
+  return scheduledDealer.toLowerCase() === "snowy stock" && reallocatedTo === "";
 };
 
 export const getDispatchStats = (dispatchData: DispatchData, reallocationData: ReallocationData) => {
@@ -221,10 +213,10 @@ export const getDispatchStats = (dispatchData: DispatchData, reallocationData: R
     const entryIds = Object.keys(entryObj);
     if (entryIds.length > 0) {
       const latestEntryId = entryIds.reduce((latest, current) => {
-        const latestTime = new Date(entryObj[latest].submitTime);
-        const currentTime = new Date(entryObj[current].submitTime);
-        return currentTime > latestTime ? current : latest;
-      });
+  const lt = parseSubmitTime(entryObj[latest].submitTime);
+  const ct = parseSubmitTime(entryObj[current].submitTime);
+  return ct > lt ? current : latest;
+});
       chassisToReallocatedTo.set(chassisNumber, entryObj[latestEntryId].reallocatedTo);
     }
   });
@@ -278,10 +270,10 @@ export const filterDispatchData = (
     const entryIds = Object.keys(entryObj);
     if (entryIds.length > 0) {
       const latestEntryId = entryIds.reduce((latest, current) => {
-        const latestTime = new Date(entryObj[latest].submitTime);
-        const currentTime = new Date(entryObj[current].submitTime);
-        return currentTime > latestTime ? current : latest;
-      });
+  const lt = parseSubmitTime(entryObj[latest].submitTime);
+  const ct = parseSubmitTime(entryObj[current].submitTime);
+  return ct > lt ? current : latest;
+});
       chassisToReallocatedTo.set(chassisNumber, entryObj[latestEntryId].reallocatedTo);
     }
   });

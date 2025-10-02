@@ -14,6 +14,34 @@ const firebaseConfig = {
   appId: "1:432092773012:web:ebc7203ea570b0da2ad281"
 };
 
+
+// --- helper: robust parse for "DD/MM/YYYY, HH:mm[:ss] am/pm" and ISO ---
+const parseSubmitTime = (raw?: string): number => {
+  if (!raw) return -Infinity;
+  const iso = Date.parse(raw);
+  if (!Number.isNaN(iso)) return iso;
+
+  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!m) return -Infinity;
+
+  let [, dd, mm, yyyy, hh, min, ss = "0", ap] = m;
+  let H = parseInt(hh, 10);
+  const D = parseInt(dd, 10);
+  const M = parseInt(mm, 10) - 1;
+  const Y = parseInt(yyyy, 10);
+
+  if (ap) {
+    const lower = ap.toLowerCase();
+    if (lower === "pm" && H < 12) H += 12;
+    if (lower === "am" && H === 12) H = 0;
+  }
+
+  const date = new Date(Y, M, D, H, parseInt(min, 10), parseInt(ss, 10));
+  return date.getTime();
+};
+
+
+
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const database = getDatabase(app);
@@ -138,11 +166,11 @@ export const processDispatchData = (
     if (entryIds.length > 0) {
       // Get the latest entry
       const latestEntryId = entryIds.reduce((latest, current) => {
-        const latestTime = new Date(entries[latest].submitTime);
-        const currentTime = new Date(entries[current].submitTime);
-        return currentTime > latestTime ? current : latest;
-      });
-      chassisToReallocatedTo.set(chassisNumber, entries[latestEntryId].reallocatedTo);
+  const lt = parseSubmitTime(entries[latest].submitTime);
+  const ct = parseSubmitTime(entries[current].submitTime);
+  return ct > lt ? current : latest;
+});
+chassisToReallocatedTo.set(chassisNumber, entries[latestEntryId].reallocatedTo);
     }
   });
 

@@ -70,29 +70,29 @@ export const processReallocationData = (
 ): ProcessedReallocationEntry[] => {
   const processed: ProcessedReallocationEntry[] = [];
   
-  // Create a map of chassis to regent production status from schedule data
+  // 建立 schedule 数据里 chassis → Regent Production 的映射
   const chassisToRegentProduction = new Map<string, string>();
   scheduleData.forEach(entry => {
     chassisToRegentProduction.set(entry.Chassis, entry["Regent Production"]);
   });
 
   Object.entries(reallocationData).forEach(([chassisNumber, entries]) => {
-    // Get the latest entry for this chassis (by submitTime)
     const entryIds = Object.keys(entries);
     if (entryIds.length === 0) return;
 
+    // 👉 挑出该 chassis 最新的一条 reallocation（按 submitTime）
     const latestEntryId = entryIds.reduce((latest, current) => {
-      const latestTime = new Date(entries[latest].submitTime);
-      const currentTime = new Date(entries[current].submitTime);
-      return currentTime > latestTime ? current : latest;
+      const lt = Date.parse(entries[latest].submitTime || '');
+      const ct = Date.parse(entries[current].submitTime || '');
+      return ct > lt ? current : latest;
     });
 
     const latestEntry = entries[latestEntryId];
-    
-    // Check if this chassis should be excluded based on schedule's Regent Production status
+
+    // 如果该 chassis 的 Regent Production = Finished，就跳过
     const regentProduction = chassisToRegentProduction.get(chassisNumber);
     if (regentProduction === "Finished") {
-      return; // Skip this entry
+      return;
     }
 
     processed.push({

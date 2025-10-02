@@ -14,37 +14,33 @@ const firebaseConfig = {
   appId: "1:432092773012:web:ebc7203ea570b0da2ad281"
 };
 
-
-// --- helper: robust parse for "DD/MM/YYYY, HH:mm[:ss] am/pm" and ISO ---
-const parseSubmitTime = (raw?: string): number => {
-  if (!raw) return -Infinity;
-  const iso = Date.parse(raw);
-  if (!Number.isNaN(iso)) return iso;
-
-  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i);
-  if (!m) return -Infinity;
-
-  let [, dd, mm, yyyy, hh, min, ss = "0", ap] = m;
-  let H = parseInt(hh, 10);
-  const D = parseInt(dd, 10);
-  const M = parseInt(mm, 10) - 1;
-  const Y = parseInt(yyyy, 10);
-
-  if (ap) {
-    const lower = ap.toLowerCase();
-    if (lower === "pm" && H < 12) H += 12;
-    if (lower === "am" && H === 12) H = 0;
-  }
-
-  const date = new Date(Y, M, D, H, parseInt(min, 10), parseInt(ss, 10));
-  return date.getTime();
-};
-
-
-
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const database = getDatabase(app);
+
+// Helper function to parse DD/MM/YYYY format dates
+const parseDDMMYYYY = (dateString: string): Date => {
+  if (!dateString || typeof dateString !== 'string') {
+    return new Date(0); // Return epoch for invalid dates
+  }
+  
+  const parts = dateString.trim().split('/');
+  if (parts.length !== 3) {
+    return new Date(0);
+  }
+  
+  const day = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed in JavaScript
+  const year = parseInt(parts[2], 10);
+  
+  // Validate the parsed values
+  if (isNaN(day) || isNaN(month) || isNaN(year) || 
+      day < 1 || day > 31 || month < 0 || month > 11 || year < 1900) {
+    return new Date(0);
+  }
+  
+  return new Date(year, month, day);
+};
 
 export const fetchReallocationData = async (): Promise<ReallocationData> => {
   try {
@@ -98,29 +94,30 @@ export const processReallocationData = (
 ): ProcessedReallocationEntry[] => {
   const processed: ProcessedReallocationEntry[] = [];
   
-  // 建立 schedule 数据里 chassis → Regent Production 的映射
+  // Create a map of chassis to regent production status from schedule data
   const chassisToRegentProduction = new Map<string, string>();
   scheduleData.forEach(entry => {
     chassisToRegentProduction.set(entry.Chassis, entry["Regent Production"]);
   });
 
   Object.entries(reallocationData).forEach(([chassisNumber, entries]) => {
+    // Get the latest entry for this chassis using DD/MM/YYYY date parsing
     const entryIds = Object.keys(entries);
     if (entryIds.length === 0) return;
 
-    // 👉 挑出该 chassis 最新的一条 reallocation（按 submitTime）
     const latestEntryId = entryIds.reduce((latest, current) => {
-      const lt = Date.parse(entries[latest].submitTime || '');
-      const ct = Date.parse(entries[current].submitTime || '');
-      return ct > lt ? current : latest;
+      // Parse dates using DD/MM/YYYY format for reallocation data
+      const latestDate = parseDDMMYYYY(entries[latest].date || entries[latest].submitTime);
+      const currentDate = parseDDMMYYYY(entries[current].date || entries[current].submitTime);
+      return currentDate > latestDate ? current : latest;
     });
 
     const latestEntry = entries[latestEntryId];
-
-    // 如果该 chassis 的 Regent Production = Finished，就跳过
+    
+    // Check if this chassis should be excluded based on schedule's Regent Production status
     const regentProduction = chassisToRegentProduction.get(chassisNumber);
     if (regentProduction === "Finished") {
-      return;
+      return; // Skip this entry
     }
 
     processed.push({
@@ -130,6 +127,8 @@ export const processReallocationData = (
       regentProduction: regentProduction || "N/A"
     });
   });
+
+  console.log(`Processed reallocation: ${Object.keys(reallocationData).length} chassis -> ${processed.length} latest entries (using DD/MM/YYYY parsing)`);
 
   return processed;
 };
@@ -164,12 +163,12 @@ export const processDispatchData = (
   Object.entries(reallocationData).forEach(([chassisNumber, entries]) => {
     const entryIds = Object.keys(entries);
     if (entryIds.length > 0) {
-      // Get the latest entry
+      // Get the latest entry using DD/MM/YYYY date parsing
       const latestEntryId = entryIds.reduce((latest, current) => {
-  const lt = parseSubmitTime(entries[latest].submitTime);
-  const ct = parseSubmitTime(entries[current].submitTime);
-  return ct > lt ? current : latest;
-});
+        const latestDate = parseDDMMYYYY(entries[latest].date || entries[latest].submitTime);
+        const currentDate = parseDDMMYYYY(entries[current].date || entries[current].submitTime);
+        return currentDate > latestDate ? current : latest;
+      });
       chassisToReallocatedTo.set(chassisNumber, entries[latestEntryId].reallocatedTo);
     }
   });
@@ -196,9 +195,17 @@ export const processDispatchData = (
 
 const isSnowyStock = (entry: ProcessedDispatchEntry, chassisToReallocatedTo: Map<string, string>) => {
   const reallocatedTo = chassisToReallocatedTo.get(entry["Chassis No"]);
-  if ((reallocatedTo ?? "").trim() === "Snowy Stock") return true;
-  const scheduledDealer = (entry as any)["Scheduled Dealer"] ?? (entry as any).regentProduction ?? "";
-  return (scheduledDealer ?? "").trim() === "Snowy Stock" && ((reallocatedTo ?? "").trim() === "");
+  
+  // If Reallocation To is "Snowy Stock", it's considered Snowy Stock
+  if (reallocatedTo === "Snowy Stock") {
+    return true;
+  }
+  
+  // Original logic: Scheduled Dealer is "Snowy Stock" with OK checks and no reallocation or reallocation to Snowy Stock
+  return entry["Scheduled Dealer"] === "Snowy Stock" &&
+         entry.Statuscheck === "OK" &&
+         entry.DealerCheck === "OK" &&
+         (!reallocatedTo || reallocatedTo.trim() === "");
 };
 
 export const getDispatchStats = (dispatchData: DispatchData, reallocationData: ReallocationData) => {
@@ -207,16 +214,16 @@ export const getDispatchStats = (dispatchData: DispatchData, reallocationData: R
   const okStatus = entries.filter(entry => entry.Statuscheck === "OK").length;
   const invalidStock = entries.filter(entry => entry.Statuscheck !== "OK").length;
   
-  // Create a map of chassis to reallocatedTo from reallocation data
+  // Create a map of chassis to reallocatedTo from reallocation data using DD/MM/YYYY parsing
   const chassisToReallocatedTo = new Map<string, string>();
   Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
     const entryIds = Object.keys(entryObj);
     if (entryIds.length > 0) {
       const latestEntryId = entryIds.reduce((latest, current) => {
-  const lt = parseSubmitTime(entryObj[latest].submitTime);
-  const ct = parseSubmitTime(entryObj[current].submitTime);
-  return ct > lt ? current : latest;
-});
+        const latestDate = parseDDMMYYYY(entryObj[latest].date || entryObj[latest].submitTime);
+        const currentDate = parseDDMMYYYY(entryObj[current].date || entryObj[current].submitTime);
+        return currentDate > latestDate ? current : latest;
+      });
       chassisToReallocatedTo.set(chassisNumber, entryObj[latestEntryId].reallocatedTo);
     }
   });
@@ -264,16 +271,16 @@ export const filterDispatchData = (
     return data.filter(entry => entry.Statuscheck !== "OK");
   }
   
-  // Create a map of chassis to reallocatedTo from reallocation data
+  // Create a map of chassis to reallocatedTo from reallocation data using DD/MM/YYYY parsing
   const chassisToReallocatedTo = new Map<string, string>();
   Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
     const entryIds = Object.keys(entryObj);
     if (entryIds.length > 0) {
       const latestEntryId = entryIds.reduce((latest, current) => {
-  const lt = parseSubmitTime(entryObj[latest].submitTime);
-  const ct = parseSubmitTime(entryObj[current].submitTime);
-  return ct > lt ? current : latest;
-});
+        const latestDate = parseDDMMYYYY(entryObj[latest].date || entryObj[latest].submitTime);
+        const currentDate = parseDDMMYYYY(entryObj[current].date || entryObj[current].submitTime);
+        return currentDate > latestDate ? current : latest;
+      });
       chassisToReallocatedTo.set(chassisNumber, entryObj[latestEntryId].reallocatedTo);
     }
   });

@@ -27,7 +27,7 @@ const parseSubmitTime = (raw?: string): number => {
   let [, dd, mm, yyyy, hh, min, ss = "0", ap] = m;
   let H = parseInt(hh, 10);
   const D = parseInt(dd, 10);
-  const M = parseInt(mm, 10) - 1; // 0-based month
+  const M = parseInt(mm, 10) - 1;
   const Y = parseInt(yyyy, 10);
 
   if (ap) {
@@ -194,11 +194,11 @@ export const processDispatchData = (
   return processed;
 };
 
-const isSnowyStock = (entry: any, chassisToReallocatedTo: Map<string, string>) => {
-  const reallocatedTo = (chassisToReallocatedTo.get(entry["Chassis No"]) ?? "").trim();
-  if (reallocatedTo.toLowerCase() === "snowy stock") return true;
-  const scheduledDealer = (entry["Scheduled Dealer"] ?? entry.regentProduction ?? "").trim();
-  return scheduledDealer.toLowerCase() === "snowy stock" && reallocatedTo === "";
+const isSnowyStock = (entry: ProcessedDispatchEntry, chassisToReallocatedTo: Map<string, string>) => {
+  const reallocatedTo = chassisToReallocatedTo.get(entry["Chassis No"]);
+  if ((reallocatedTo ?? "").trim() === "Snowy Stock") return true;
+  const scheduledDealer = (entry as any)["Scheduled Dealer"] ?? (entry as any).regentProduction ?? "";
+  return (scheduledDealer ?? "").trim() === "Snowy Stock" && ((reallocatedTo ?? "").trim() === "");
 };
 
 export const getDispatchStats = (dispatchData: DispatchData, reallocationData: ReallocationData) => {

@@ -2,9 +2,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ChevronDown, ChevronUp, ArrowUpDown, AlertTriangle, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, ArrowUpDown, AlertTriangle, RefreshCw, Mail } from "lucide-react";
 import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError } from "@/lib/firebase";
+import { sendReportEmail, EmailData } from "@/lib/emailjs";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 
@@ -89,6 +90,7 @@ export const DispatchTable = ({
     key: string;
     direction: 'asc' | 'desc';
   } | null>(null);
+  const [sendingEmail, setSendingEmail] = useState<string | null>(null);
 
   const handleSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -102,14 +104,39 @@ export const DispatchTable = ({
     const entry = allData.find(e => e["Chassis No"] === chassisNo);
     if (!entry) return;
 
-    const errorDetails = `Dealer Check Mismatch - SAP Data: ${entry["SAP Data"] || "N/A"}, Scheduled Dealer: ${entry["Scheduled Dealer"] || "N/A"}, Reallocation To: ${entry.reallocatedTo || "N/A"}`;
-    
-    const success = await reportError(chassisNo, errorDetails);
-    
-    if (success) {
-      toast.success(`Error reported for chassis ${chassisNo}`);
-    } else {
-      toast.error("Failed to report error. Please try again.");
+    setSendingEmail(chassisNo);
+
+    try {
+      // Prepare email data
+      const emailData: EmailData = {
+        chassisNo: entry["Chassis No"],
+        sapData: entry["SAP Data"] || "N/A",
+        scheduledDealer: entry["Scheduled Dealer"] || "N/A",
+        reallocatedTo: entry.reallocatedTo || "No Reallocation",
+        customer: entry.Customer || "N/A",
+        model: entry.Model || "N/A",
+        statusCheck: entry.Statuscheck,
+        dealerCheck: entry.DealerCheck,
+        grDays: entry["GR to GI Days"]
+      };
+
+      // Send email via EmailJS
+      const emailSent = await sendReportEmail(emailData);
+
+      if (emailSent) {
+        // Also report to Firebase
+        const errorDetails = `Dealer Check Mismatch - SAP Data: ${entry["SAP Data"] || "N/A"}, Scheduled Dealer: ${entry["Scheduled Dealer"] || "N/A"}, Reallocation To: ${entry.reallocatedTo || "N/A"}`;
+        await reportError(chassisNo, errorDetails);
+
+        toast.success(`Report sent successfully for chassis ${chassisNo}! Email notification sent to dispatch team.`);
+      } else {
+        toast.error("Failed to send email report. Please check your connection and try again.");
+      }
+    } catch (error) {
+      console.error('Error sending report:', error);
+      toast.error("Failed to send report. Please try again.");
+    } finally {
+      setSendingEmail(null);
     }
   };
 
@@ -226,6 +253,7 @@ export const DispatchTable = ({
               {filteredAndSortedData.map((entry, index) => {
                 const barColor = getGRDaysColor(entry["GR to GI Days"]);
                 const barWidth = getGRDaysWidth(entry["GR to GI Days"], maxGRDays);
+                const isLoading = sendingEmail === entry["Chassis No"];
                 
                 return (
                   <TableRow key={index}>
@@ -274,10 +302,20 @@ export const DispatchTable = ({
                         size="sm"
                         variant="outline"
                         onClick={() => handleReportError(entry["Chassis No"])}
+                        disabled={isLoading}
                         className="flex items-center space-x-1 text-xs"
                       >
-                        <AlertTriangle className="h-3 w-3" />
-                        <span className="hidden sm:inline">Report</span>
+                        {isLoading ? (
+                          <>
+                            <Mail className="h-3 w-3 animate-pulse" />
+                            <span className="hidden sm:inline">Sending...</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="h-3 w-3" />
+                            <span className="hidden sm:inline">Report</span>
+                          </>
+                        )}
                       </Button>
                     </TableCell>
                   </TableRow>

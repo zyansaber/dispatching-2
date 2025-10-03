@@ -95,7 +95,7 @@ const Index = () => {
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Dispatch Dashboard</h1>
-          <p className="text-gray-600">Real-time Firebase data monitoring and management</p>
+          <p className="text-gray-600">SAP Data / Reallocation Data / Schedule Data</p>
         </div>
 
         <DispatchStats

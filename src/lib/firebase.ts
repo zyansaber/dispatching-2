@@ -3,6 +3,30 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, push } from "firebase/database";
 import { ReallocationData, DispatchData, ScheduleData, ProcessedReallocationEntry, ProcessedDispatchEntry } from "@/types";
 
+// ⬇️ 放到 src/lib/firebase.ts 里（复用你现有的 db 导出）:
+import { ref, update, getDatabase } from "firebase/database";
+
+// 如你的文件里已有 db：请删除下面这一行并使用现有的 db
+const db = getDatabase();
+
+// 如你的文件里已有 escapeKey 则复用它即可
+function escapeKey(key: string) {
+  return key.replace(/[.#$\[\]\/]/g, "_");
+}
+
+// ✅ 新增：/Dispatch/<Chassis No> 的引用
+export function dispatchRef(chassisNo: string) {
+  return ref(db, `Dispatch/${escapeKey(chassisNo)}`);
+}
+
+// ✅ 新增：按底盘号进行“局部更新”
+export async function patchDispatch(
+  chassisNo: string,
+  data: Record<string, any>
+) {
+  await update(dispatchRef(chassisNo), data);
+}
+
 // Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyBcczqGj5X1_w9aCX1lOK4-kgz49Oi03Bg",

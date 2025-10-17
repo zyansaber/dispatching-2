@@ -1,23 +1,35 @@
-<!DOCTYPE html>
-<html lang="en">
+// src/types/index.ts
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" href="https://public-frontend-cos.metadl.com/mgx/img/favicon.png" type="image/png">
-  <title>Dispatch Dashboard</title>
-  <meta name="description" content="Firebase Dispatch Data Dashboard" />
-  <meta name="author" content="MGX" />
+export interface DispatchEntry {
+  /** 主键，与 /Dispatch 下的键一致 */
+  "Chassis No": string;
 
-  <meta property="og:title" content="Dispatch Dashboard" />
-  <meta property="og:description" content="Firebase Dispatch Data Dashboard" />
-  <meta property="og:type" content="website" />
+  /** ✅ 新增：显示数据库里的 Matched PO No */
+  "Matched PO No"?: string | null;
 
-</head>
+  /** 你已有的其它字段（按需保留） */
+  "Days From GR"?: number;
+  "GR Date (Perth)"?: string | null;
+  "PGI Date (3120)"?: string | null;
+  Customer?: string;
+  Model?: string;
+  "SAP Data"?: string;
+  "Scheduled Dealer"?: string;
+  Statuscheck?: "OK" | "Mismatch" | string;
+  DealerCheck?: "OK" | "Mismatch" | string;
 
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
+  /** ✅ 新增：On Hold 状态 */
+  OnHold?: boolean;
+  OnHoldAt?: string | null;  // ISO
+  OnHoldBy?: string | null;
 
-</html>
+  /** ✅ 新增：可编辑备注 */
+  Comment?: string | null;
+
+  /** ✅ 新增：预计提车时间（ISO） */
+  EstimatedPickupAt?: string | null;
+}
+
+export interface ProcessedDispatchEntry extends DispatchEntry {
+  reallocatedTo?: string;
+}

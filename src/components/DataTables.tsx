@@ -76,7 +76,7 @@ export const DispatchTable = ({
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc'; } | null>(null);
   const [sendingEmail, setSendingEmail] = useState<string | null>(null);
 
-  // ✅ 为新增列增加的状态（行内草稿 & 保存状态）
+  // ✅ 行内编辑状态
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [pickupDraft, setPickupDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -98,7 +98,6 @@ export const DispatchTable = ({
         sapData: entry["SAP Data"] || "N/A",
         scheduledDealer: entry["Scheduled Dealer"] || "N/A",
         reallocatedTo: entry.reallocatedTo || "No Reallocation",
-        // 你原来传的扩展字段如果模板需要可继续加
       };
       const emailSent = await sendReportEmail(emailData);
       if (emailSent) {
@@ -116,27 +115,27 @@ export const DispatchTable = ({
     }
   };
 
-  const safeStringIncludes = (value: any, searchTerm: string): boolean => {
+  const safeStringIncludes = (value: any, searchLower: string): boolean => {
     if (value === null || value === undefined) return false;
-    return String(value).toLowerCase().includes(searchTerm);
+    return String(value).toLowerCase().includes(searchLower);
   };
 
   const filteredAndSortedData = useMemo(() => {
+    const searchLower = (searchTerm || "").toLowerCase();
     let filtered = searchTerm 
       ? allData.filter(entry => {
-          const searchLower = searchTerm.toLowerCase();
           const dispatchMatch = (
             safeStringIncludes(entry["Chassis No"], searchLower) ||
             safeStringIncludes(entry.Customer, searchLower) ||
             safeStringIncludes(entry.Model, searchLower) ||
-            safeStringIncludes(entry["Matched PO No"], searchLower) || // ✅ 支持搜索
+            safeStringIncludes(entry["Matched PO No"], searchLower) ||
             safeStringIncludes(entry["SAP Data"], searchLower) ||
             safeStringIncludes(entry["Scheduled Dealer"], searchLower) ||
             safeStringIncludes(entry.Statuscheck, searchLower) ||
             safeStringIncludes(entry.DealerCheck, searchLower) ||
             safeStringIncludes(entry.reallocatedTo, searchLower) ||
-            safeStringIncludes(entry.Comment, searchLower) ||          // ✅ 支持搜索
-            safeStringIncludes(entry.EstimatedPickupAt, searchLower)   // ✅ 支持搜索
+            safeStringIncludes(entry.Comment, searchLower) ||
+            safeStringIncludes(entry.EstimatedPickupAt, searchLower)
           );
           const reallocationMatch = reallocationData.some(re => 
             re.chassisNumber === entry["Chassis No"] && (
@@ -172,7 +171,7 @@ export const DispatchTable = ({
 
   const maxGRDays = Math.max(...allData.map(entry => entry["GR to GI Days"]), 1);
 
-  // ===== 工具：日期格式转换 =====
+  // ===== 日期工具 =====
   const isoToDatetimeLocal = (iso?: string | null) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -187,7 +186,7 @@ export const DispatchTable = ({
   };
   const minDT = useMemo(minDatetimeLocalNow, []);
 
-  // ===== 新增：按钮/保存处理函数 =====
+  // ===== 写库处理 =====
   const handleToggleOnHold = async (row: ProcessedDispatchEntry, next: boolean) => {
     const id = row["Chassis No"];
     setSaving((s) => ({ ...s, [id]: true }));
@@ -241,16 +240,19 @@ export const DispatchTable = ({
   };
 
   const SortableHeader = ({ children, sortKey, className = "" }: { children: React.ReactNode; sortKey: string; className?: string }) => (
-    <TableHead className={`cursor-pointer hover:bg-gray-50 ${className}`} onClick={() => handleSort(sortKey)}>
-      <div className="flex items-center space-x-1">
+    <TableHead
+      className={`cursor-pointer hover:bg-gray-50 align-top ${className}`}
+      onClick={() => handleSort(sortKey)}
+    >
+      <div className="flex items-center gap-1">
         <span className="truncate">{children}</span>
-        <ArrowUpDown className="h-3 w-3 flex-shrink-0" />
+        <ArrowUpDown className="h-3 w-3 shrink-0" />
       </div>
     </TableHead>
   );
 
   return (
-    <Card className="w-full">
+    <Card className="w-full max-w-none">
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <CardTitle className="text-lg">
@@ -264,31 +266,30 @@ export const DispatchTable = ({
           />
         </div>
       </CardHeader>
+
+      {/* ✅ 不要横向滚动条 */}
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <Table>
+        <div className="overflow-visible">
+          <Table className="w-full table-auto">
             <TableHeader>
               <TableRow>
-                <SortableHeader sortKey="Chassis No" className="min-w-[120px]">Chassis No</SortableHeader>
-                <SortableHeader sortKey="GR to GI Days" className="min-w-[100px]">GR Days</SortableHeader>
-                <SortableHeader sortKey="Customer" className="min-w-[100px]">Customer</SortableHeader>
-                <SortableHeader sortKey="Model" className="min-w-[80px]">Model</SortableHeader>
-                <SortableHeader sortKey="SAP Data" className="min-w-[100px]">SAP Data</SortableHeader>
-                <SortableHeader sortKey="Scheduled Dealer" className="min-w-[120px]">Scheduled Dealer</SortableHeader>
-                {/* ✅ 新增列：Matched PO No（可排序） */}
-                <SortableHeader sortKey="Matched PO No" className="min-w-[120px]">Matched PO No</SortableHeader>
-                {/* ✅ 新增列：On Hold（按钮） */}
-                <TableHead className="min-w-[120px]">On Hold</TableHead>
-                {/* ✅ 新增列：Comment（可编辑保存） */}
-                <TableHead className="min-w-[220px]">Comment</TableHead>
-                {/* ✅ 新增列：Estimated pickup time（今天以后 + 保存） */}
-                <TableHead className="min-w-[220px]">Estimated pickup time</TableHead>
-                <SortableHeader sortKey="Statuscheck" className="min-w-[80px]">Status</SortableHeader>
-                <SortableHeader sortKey="DealerCheck" className="min-w-[80px]">Dealer</SortableHeader>
-                <SortableHeader sortKey="reallocatedTo" className="min-w-[100px]">Reallocation</SortableHeader>
-                <TableHead className="min-w-[100px]">Actions</TableHead>
+                <SortableHeader sortKey="Chassis No">Chassis No</SortableHeader>
+                <SortableHeader sortKey="GR to GI Days">GR Days</SortableHeader>
+                <SortableHeader sortKey="Customer">Customer</SortableHeader>
+                <SortableHeader sortKey="Model">Model</SortableHeader>
+                <SortableHeader sortKey="SAP Data">SAP Data</SortableHeader>
+                <SortableHeader sortKey="Scheduled Dealer">Scheduled Dealer</SortableHeader>
+                <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
+                <TableHead>On Hold</TableHead>
+                <TableHead>Comment</TableHead>
+                <TableHead>Estimated pickup time</TableHead>
+                <SortableHeader sortKey="Statuscheck">Status</SortableHeader>
+                <SortableHeader sortKey="DealerCheck">Dealer</SortableHeader>
+                <SortableHeader sortKey="reallocatedTo">Reallocation</SortableHeader>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
+
             <TableBody>
               {filteredAndSortedData.map((entry, index) => {
                 const barColor = getGRDaysColor(entry["GR to GI Days"]);
@@ -300,9 +301,10 @@ export const DispatchTable = ({
                 const pickupLocal = pickupDraft[id] ?? isoToDatetimeLocal(entry.EstimatedPickupAt);
 
                 return (
-                  <TableRow key={index}>
-                    <TableCell className="font-medium text-sm">{id}</TableCell>
-                    <TableCell className="min-w-[100px]">
+                  <TableRow key={index} className="align-top">
+                    <TableCell className="font-medium text-sm whitespace-normal break-words">{id}</TableCell>
+
+                    <TableCell className="whitespace-normal break-words">
                       <div className="space-y-1">
                         <div className="flex justify-between text-xs">
                           <span>{entry["GR to GI Days"]}</span>
@@ -313,16 +315,17 @@ export const DispatchTable = ({
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm truncate max-w-[100px]" title={entry.Customer}>{entry.Customer}</TableCell>
-                    <TableCell className="text-sm truncate max-w-[80px]" title={entry.Model || "-"}>{entry.Model || "-"}</TableCell>
-                    <TableCell className="text-sm truncate max-w-[100px]" title={entry["SAP Data"] || "-"}>{entry["SAP Data"] || "-"}</TableCell>
-                    <TableCell className="text-sm truncate max-w-[120px]" title={entry["Scheduled Dealer"] || "-"}>{entry["Scheduled Dealer"] || "-"}</TableCell>
 
-                    {/* ✅ Matched PO No（只读） */}
-                    <TableCell className="text-sm truncate max-w-[120px]" title={entry["Matched PO No"] || "-"}>{entry["Matched PO No"] || "-"}</TableCell>
+                    <TableCell className="text-sm whitespace-normal break-words">{entry.Customer || "-"}</TableCell>
+                    <TableCell className="text-sm whitespace-normal break-words">{entry.Model || "-"}</TableCell>
+                    <TableCell className="text-sm whitespace-normal break-words">{entry["SAP Data"] || "-"}</TableCell>
+                    <TableCell className="text-sm whitespace-normal break-words">{entry["Scheduled Dealer"] || "-"}</TableCell>
 
-                    {/* ✅ On Hold / Cancel On Hold */}
-                    <TableCell className="min-w-[120px]">
+                    {/* Matched PO No */}
+                    <TableCell className="text-sm whitespace-normal break-words">{entry["Matched PO No"] || "-"}</TableCell>
+
+                    {/* On Hold */}
+                    <TableCell className="whitespace-normal break-words">
                       {entry.OnHold ? (
                         <Button size="sm" className="bg-red-600 text-white" disabled={saving[id]} onClick={() => handleToggleOnHold(entry, false)}>
                           Cancel On Hold
@@ -334,11 +337,11 @@ export const DispatchTable = ({
                       )}
                     </TableCell>
 
-                    {/* ✅ Comment（可编辑 + 保存） */}
-                    <TableCell className="min-w-[220px]">
+                    {/* Comment */}
+                    <TableCell className="whitespace-normal break-words">
                       <div className="flex items-center gap-2">
                         <Input
-                          className="w-48"
+                          className="w-full max-w-xs"
                           placeholder="Add a comment"
                           value={commentValue}
                           onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -351,12 +354,12 @@ export const DispatchTable = ({
                       {error[id] && <div className="text-xs text-red-600 mt-1">{error[id]}</div>}
                     </TableCell>
 
-                    {/* ✅ Estimated pickup time（今天以后 + 保存） */}
-                    <TableCell className="min-w-[220px]">
+                    {/* Estimated pickup time */}
+                    <TableCell className="whitespace-normal break-words">
                       <div className="flex items-center gap-2">
                         <input
                           type="datetime-local"
-                          className="px-2 py-1 border rounded"
+                          className="px-2 py-1 border rounded w-full max-w-xs"
                           min={minDT}
                           value={pickupLocal}
                           onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -377,10 +380,12 @@ export const DispatchTable = ({
                         {entry.DealerCheck}
                       </span>
                     </TableCell>
-                    <TableCell className="font-medium text-blue-600 text-sm truncate max-w-[100px]" title={entry.reallocatedTo || "-"}>{entry.reallocatedTo || "-"}</TableCell>
+                    <TableCell className="font-medium text-blue-600 text-sm whitespace-normal break-words">
+                      {entry.reallocatedTo || "-"}
+                    </TableCell>
 
                     <TableCell>
-                      <Button size="sm" variant="outline" onClick={() => handleReportError(id)} disabled={isLoading} className="flex items-center space-x-1 text-xs">
+                      <Button size="sm" variant="outline" onClick={() => handleReportError(id)} disabled={isLoading} className="flex items-center gap-1 text-xs">
                         {isLoading ? (<><Mail className="h-3 w-3 animate-pulse" /><span className="hidden sm:inline">Sending...</span></>) : (<><AlertTriangle className="h-3 w-3" /><span className="hidden sm:inline">Report</span></>)}
                       </Button>
                     </TableCell>

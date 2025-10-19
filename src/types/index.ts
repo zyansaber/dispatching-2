@@ -1,41 +1,43 @@
 // src/types/index.ts
 
-/** ===== 基础：Dispatch（/Dispatch/<Chassis No>） ===== */
 export interface DispatchEntry {
   /** 主键，与 /Dispatch 下的键一致 */
   "Chassis No": string;
 
-  /** 显示数据库里的 Matched PO No（新增） */
+  /** 显示数据库里的 Matched PO No（新增过的） */
   "Matched PO No"?: string | null;
 
-  /** 你已有/使用中的其它字段 */
+  /** 基础字段 */
+  Customer?: string;
+  Model?: string;
+
+  /** ✅ 就在这里加这一行（可读即可） */
+  Code?: string | null;
+
+  /** 其它已有字段 */
   "GR to GI Days"?: number;
   "Days From GR"?: number;
   "GR Date (Perth)"?: string | null;
   "PGI Date (3120)"?: string | null;
-  Customer?: string;
-  Model?: string;
   "SAP Data"?: string;
   "Scheduled Dealer"?: string;
   Statuscheck?: "OK" | "Mismatch" | string;
   DealerCheck?: "OK" | "Mismatch" | string;
 
-  /** On Hold（新增） */
+  /** On Hold 相关 */
   OnHold?: boolean;
-  OnHoldAt?: string | null;  // ISO
+  OnHoldAt?: string | null;
   OnHoldBy?: string | null;
 
-  /** 备注（新增） */
+  /** 备注与预计提车时间 */
   Comment?: string | null;
-
-  /** 预计提车时间（ISO，新增） */
   EstimatedPickupAt?: string | null;
 }
 
-/** 处理过的 Dispatch（增加 reallocatedTo 等） */
 export interface ProcessedDispatchEntry extends DispatchEntry {
   reallocatedTo?: string;
 }
+
 
 /** Map 形式的 Dispatch 整表 */
 export type DispatchData = Record<string, DispatchEntry>;

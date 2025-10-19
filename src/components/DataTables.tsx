@@ -1,3 +1,4 @@
+// src/components/DataTables.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +10,9 @@ import { getGRDaysColor, getGRDaysWidth, reportError } from "@/lib/firebase";
 import { patchDispatch } from "@/lib/firebase";
 import { sendReportEmail, EmailData } from "@/lib/emailjs";
 import { toast } from "sonner";
+
+/* ====================== 小工具：通用单元格样式，防横向溢出 ====================== */
+const CELL = "text-sm whitespace-pre-wrap break-words break-all hyphens-auto";
 
 /* ====================== DispatchStats（保持旧接口） ====================== */
 interface DispatchStatsProps {
@@ -22,13 +26,7 @@ interface DispatchStatsProps {
 }
 
 export const DispatchStats: React.FC<DispatchStatsProps> = ({
-  total,
-  invalidStock,
-  snowyStock,
-  canBeDispatched,
-  onFilterChange,
-  activeFilter,
-  onRefresh
+  total, invalidStock, snowyStock, canBeDispatched, onFilterChange, activeFilter, onRefresh
 }) => {
   const cards = [
     { label: "Total Number", value: total, filter: "all", color: "text-blue-600" },
@@ -64,7 +62,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== DispatchTable（两行布局 + 实时/乐观更新 + OnHold卡片） ====================== */
+/* ====================== DispatchTable（两行布局 + 实时/乐观更新 + 无横滚） ====================== */
 interface DispatchTableProps {
   data: ProcessedDispatchEntry[];
   searchTerm: string;
@@ -187,7 +185,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   const maxGRDays = Math.max(...mergedAll.map(entry => entry["GR to GI Days"] || 0), 1);
 
-  // 日期工具
+  // ===== 日期工具 =====
   const isoToDatetimeLocal = (iso?: string | null) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -202,7 +200,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   };
   const minDT = useMemo(minDatetimeLocalNow, []);
 
-  // 写库（乐观 + 回滚）
+  // ===== 写库（乐观 + 回滚） =====
   const handleToggleOnHold = async (row: ProcessedDispatchEntry, next: boolean) => {
     const id = row["Chassis No"];
     const optimisticPatch = { OnHold: next, OnHoldAt: new Date().toISOString(), OnHoldBy: "webapp" as const };
@@ -309,9 +307,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* 主表（未 On Hold） */}
-      <Card className="w-full max-w-none">
+      <Card className="w-full max-w-full">
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
             <CardTitle className="text-lg">
@@ -327,8 +325,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardHeader>
 
         <CardContent className="p-0">
-          <div className="overflow-visible">
-            <Table className="w-full table-auto">
+          {/* 关键：禁止横向滚动 + 表格固定布局 + 内容强制换行 */}
+          <div className="w-full max-w-full overflow-x-hidden">
+            <Table className="w-full table-fixed">
               <TableHeader>
                 <TableRow>
                   <SortableHeader sortKey="Chassis No">Chassis No</SortableHeader>
@@ -362,9 +361,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                     <React.Fragment key={id}>
                       {/* 第一行：核心字段 */}
                       <TableRow className={`align-top ${rowBg}`}>
-                        <TableCell className="font-medium text-sm whitespace-normal break-words">{id}</TableCell>
+                        <TableCell className={`font-medium ${CELL}`}>{id}</TableCell>
 
-                        <TableCell className="whitespace-normal break-words">
+                        <TableCell className={CELL}>
                           <div className="space-y-1">
                             <div className="flex justify-between text-xs">
                               <span>{entry["GR to GI Days"] ?? "-"}</span>
@@ -376,14 +375,14 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                           </div>
                         </TableCell>
 
-                        <TableCell className="text-sm whitespace-normal break-words">{entry.Customer || "-"}</TableCell>
-                        <TableCell className="text-sm whitespace-normal break-words">{entry.Model || "-"}</TableCell>
-                        <TableCell className="text-sm whitespace-normal break-words">{entry["SAP Data"] || "-"}</TableCell>
-                        <TableCell className="text-sm whitespace-normal break-words">{entry["Scheduled Dealer"] || "-"}</TableCell>
-                        <TableCell className="text-sm whitespace-normal break-words">{entry["Matched PO No"] || "-"}</TableCell>
-                        <TableCell className="text-sm whitespace-normal break-words">{entry.Code || "-"}</TableCell>
+                        <TableCell className={CELL}>{entry.Customer || "-"}</TableCell>
+                        <TableCell className={CELL}>{entry.Model || "-"}</TableCell>
+                        <TableCell className={CELL}>{entry["SAP Data"] || "-"}</TableCell>
+                        <TableCell className={CELL}>{entry["Scheduled Dealer"] || "-"}</TableCell>
+                        <TableCell className={CELL}>{entry["Matched PO No"] || "-"}</TableCell>
+                        <TableCell className={CELL}>{entry.Code || "-"}</TableCell>
 
-                        <TableCell>
+                        <TableCell className="min-w-0">
                           <Button
                             size="sm"
                             className={entry.OnHold ? "bg-red-600 text-white" : "bg-amber-500 text-white"}
@@ -394,21 +393,21 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                           </Button>
                         </TableCell>
 
-                        <TableCell>
+                        <TableCell className={CELL}>
                           <span className={`px-2 py-1 rounded-full text-xs ${entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                             {entry.Statuscheck}
                           </span>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={CELL}>
                           <span className={`px-2 py-1 rounded-full text-xs ${entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                             {entry.DealerCheck}
                           </span>
                         </TableCell>
-                        <TableCell className="font-medium text-blue-600 text-sm whitespace-normal break-words">
+                        <TableCell className={`${CELL} font-medium text-blue-600`}>
                           {entry.reallocatedTo || "-"}
                         </TableCell>
 
-                        <TableCell>
+                        <TableCell className="min-w-0">
                           <Button
                             size="sm"
                             variant="outline"
@@ -426,10 +425,10 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         <TableCell colSpan={13}>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 py-3">
                             {/* Comment（允许空白保存） */}
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span className="text-xs text-gray-500 w-28 shrink-0">Comment</span>
                               <Input
-                                className="w-full"
+                                className="w-full max-w-[320px]"
                                 placeholder="Add a comment"
                                 value={commentValue}
                                 onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -441,11 +440,11 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                             </div>
 
                             {/* Estimated pickup time（今天以后） */}
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span className="text-xs text-gray-500 w-28 shrink-0">Estimated pickup</span>
                               <input
                                 type="datetime-local"
-                                className="px-2 py-1 border rounded w-full"
+                                className="px-2 py-1 border rounded w-full max-w-[260px]"
                                 min={minDT}
                                 value={pickupLocal}
                                 onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -467,7 +466,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 卡片区 */}
+      {/* On Hold 卡片区：响应式等宽 + 统一高度 + 无横向滚动 */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}
@@ -482,7 +481,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   );
 };
 
-/* ====================== On Hold 卡片（供上面引用） ====================== */
+/* ====================== On Hold 卡片（均匀栅格 & 统一尺寸） ====================== */
 const OnHoldBoard: React.FC<{
   rows: ProcessedDispatchEntry[];
   saving: Record<string, boolean>;
@@ -501,12 +500,13 @@ const OnHoldBoard: React.FC<{
 }) => {
   if (!rows.length) return null;
   return (
-    <Card className="w-full">
+    <Card className="w-full max-w-full overflow-x-hidden">
       <CardHeader>
         <CardTitle className="text-lg">On Hold</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+        {/* 1/2/3/4 列自适应；items-stretch 保证卡片等高；gap 加大视觉呼吸 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch w-full max-w-full">
           {rows.map((row, idx) => {
             const id = row["Chassis No"];
             const bg = idx % 2 === 0 ? "bg-white" : "bg-gray-50";
@@ -514,29 +514,33 @@ const OnHoldBoard: React.FC<{
             const pickupLocal  = pickupDraft[id]  ?? (row.EstimatedPickupAt ? new Date(row.EstimatedPickupAt).toISOString().slice(0,16) : "");
 
             return (
-              <div key={id} className={`rounded-xl border p-3 ${bg}`}>
-                <div className="flex items-center justify-between">
-                  <div className="font-semibold">{id}</div>
+              <div key={id} className={`h-full flex flex-col rounded-xl border p-4 shadow-sm ${bg}`}>
+                {/* 头部：标题 + 按钮 */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-semibold break-words break-all hyphens-auto">{id}</div>
                   <Button
                     size="sm"
                     className="bg-red-600 text-white"
                     disabled={saving[id]}
                     onClick={() => handlers.handleToggleOnHold(row, false)}
                   >
-                    Cancel On Hold
+                    Cancel
                   </Button>
                 </div>
-                <div className="mt-2 text-sm space-y-1">
-                  <div><span className="text-gray-500">Customer：</span>{row.Customer || "-"}</div>
-                  <div><span className="text-gray-500">Model：</span>{row.Model || "-"}</div>
-                  <div><span className="text-gray-500">Code：</span>{row.Code || "-"}</div>
-                  <div><span className="text-gray-500">Matched PO No：</span>{row["Matched PO No"] || "-"}</div>
+
+                {/* 信息区：占据可用空间，保证卡片等高时内容拉伸自然 */}
+                <div className="mt-2 text-sm space-y-1 flex-1 min-h-[120px]">
+                  <div className={CELL}><span className="text-gray-500">Customer：</span>{row.Customer || "-"}</div>
+                  <div className={CELL}><span className="text-gray-500">Model：</span>{row.Model || "-"}</div>
+                  <div className={CELL}><span className="text-gray-500">Code：</span>{row.Code || "-"}</div>
+                  <div className={CELL}><span className="text-gray-500">Matched PO：</span>{row["Matched PO No"] || "-"}</div>
                 </div>
 
+                {/* 编辑区：固定控件宽度，避免撑宽 */}
                 <div className="mt-3 space-y-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     <Input
-                      className="w-full"
+                      className="w-full max-w-[320px]"
                       placeholder="Add a comment"
                       value={commentValue}
                       onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -546,10 +550,11 @@ const OnHoldBoard: React.FC<{
                       Save
                     </Button>
                   </div>
-                  <div className="flex items-center gap-2">
+
+                  <div className="flex items-center gap-2 min-w-0">
                     <input
                       type="datetime-local"
-                      className="px-2 py-1 border rounded w-full"
+                      className="px-2 py-1 border rounded w-full max-w-[260px]"
                       min={new Date().toISOString().slice(0,16)}
                       value={pickupLocal}
                       onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -558,6 +563,7 @@ const OnHoldBoard: React.FC<{
                       Save
                     </Button>
                   </div>
+
                   {error[id] && <div className="text-xs text-red-600">{error[id]}</div>}
                 </div>
               </div>
@@ -629,7 +635,7 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
   );
 
   return (
-    <Card className="w-full">
+    <Card className="w-full max-w-full overflow-x-hidden">
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <CardTitle className="text-lg">Reallocation</CardTitle>
@@ -642,8 +648,8 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-visible">
-          <Table className="w-full table-auto">
+        <div className="w-full max-w-full overflow-x-hidden">
+          <Table className="w-full table-fixed">
             <TableHeader>
               <TableRow>
                 <SortableHeader sortKey="chassisNumber">Chassis</SortableHeader>
@@ -656,15 +662,15 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredAndSortedData.map((re) => (
+              {data.map((re) => (
                 <TableRow key={`${re.chassisNumber}-${re.entryId || re.submitTime || "row"}`}>
-                  <TableCell className="text-sm whitespace-normal break-words">{re.chassisNumber}</TableCell>
-                  <TableCell className="text-sm whitespace-normal break-words">{re.customer || "-"}</TableCell>
-                  <TableCell className="text-sm whitespace-normal break-words">{re.model || "-"}</TableCell>
-                  <TableCell className="text-sm whitespace-normal break-words">{re.originalDealer || "-"}</TableCell>
-                  <TableCell className="text-sm whitespace-normal break-words">{re.reallocatedTo || "-"}</TableCell>
-                  <TableCell className="text-sm whitespace-normal break-words">{re.regentProduction || "-"}</TableCell>
-                  <TableCell className="text-sm whitespace-normal break-words">{re.issue?.type || "-"}</TableCell>
+                  <TableCell className={CELL}>{re.chassisNumber}</TableCell>
+                  <TableCell className={CELL}>{re.customer || "-"}</TableCell>
+                  <TableCell className={CELL}>{re.model || "-"}</TableCell>
+                  <TableCell className={CELL}>{re.originalDealer || "-"}</TableCell>
+                  <TableCell className={CELL}>{re.reallocatedTo || "-"}</TableCell>
+                  <TableCell className={CELL}>{re.regentProduction || "-"}</TableCell>
+                  <TableCell className={CELL}>{re.issue?.type || "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

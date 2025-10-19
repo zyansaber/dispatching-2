@@ -1,78 +1,96 @@
 // src/types/index.ts
 
-/** -------------------- Dispatch（发运）类型 -------------------- */
-
+/** ----------------------------
+ *  Dispatch（/Dispatch）原始项
+ *  说明：
+ *  - "Chassis No" 为主键（必须）
+ *  - 其它字段全部可选：没有不会报错
+ * ----------------------------- */
 export interface DispatchEntry {
   /** 主键，与 /Dispatch 下的键一致 */
   "Chassis No": string;
 
-  /** ✅ 新增：显示数据库里的 Matched PO No */
+  /** ✅ 新增：显示数据库里的 Matched PO No（只读展示） */
   "Matched PO No"?: string | null;
 
+  /** ✅ 新增：Code（只读展示，可选） */
+  Code?: string | null;
+
   /** 你已有的其它字段（按需保留） */
-  "GR to GI Days"?: number;
-  "Days From GR"?: number;
+  "GR to GI Days"?: number | null;
+  "Days From GR"?: number | null;
   "GR Date (Perth)"?: string | null;
   "PGI Date (3120)"?: string | null;
-  Customer?: string;
-  Model?: string;
-  "SAP Data"?: string;
-  "Scheduled Dealer"?: string;
-  Statuscheck?: "OK" | "Mismatch" | string;
-  DealerCheck?: "OK" | "Mismatch" | string;
 
-  /** ✅ 新增：On Hold 状态 */
+  Customer?: string | null;
+  Model?: string | null;
+
+  "SAP Data"?: string | null;
+  "Scheduled Dealer"?: string | null;
+
+  Statuscheck?: "OK" | "Mismatch" | string | null;
+  DealerCheck?: "OK" | "Mismatch" | string | null;
+
+  /** ✅ 新增：On Hold 状态（后加字段：没有时按未 on hold 处理） */
   OnHold?: boolean;
-  OnHoldAt?: string | null;  // ISO
+  OnHoldAt?: string | null;   // ISO 字符串
   OnHoldBy?: string | null;
 
-  /** ✅ 新增：可编辑备注 */
+  /** ✅ 新增：可编辑备注（后加字段：可缺省） */
   Comment?: string | null;
 
-  /** ✅ 新增：预计提车时间（ISO） */
+  /** ✅ 新增：预计提车时间（ISO），今天以后 */
   EstimatedPickupAt?: string | null;
-
-  /** ✅ 新增：业务 Code（只读展示即可） */
-  Code?: string | null;
 }
 
-/** 派生后的 Dispatch 行（可含 reallocatedTo） */
+/** 处理后的 Dispatch 项（在前端注入 reallocatedTo 等） */
 export interface ProcessedDispatchEntry extends DispatchEntry {
   reallocatedTo?: string;
 }
 
-/** -------------------- Reallocation（调拨）类型 -------------------- */
+/** ----------------------------
+ *  Reallocation（/reallocation）类型
+ * ----------------------------- */
 
+/** 单条调拨记录（不同项目可能字段命名略有差异，全部可选） */
 export interface ReallocationEntry {
+  submitTime?: string;              // "DD/MM/YYYY" 或 ISO
+  date?: string;                    // "DD/MM/YYYY"
   customer?: string;
   model?: string;
   originalDealer?: string;
   reallocatedTo?: string;
-  regentProduction?: string;
-  submitTime: string;       // ISO 或 DD/MM/YYYY
-  date?: string;            // 可能存在的另一个日期字段（DD/MM/YYYY）
   signedPlansReceived?: string;
-  issue?: { type: string };
+  issue?: { type?: string };
+  // 允许透传数据库里的其它键
+  [k: string]: any;
 }
 
-/** /reallocation 节点的原始结构：底盘号 -> 多条记录 */
-export type ReallocationData = Record<
-  string,                        // chassisNumber
-  Record<string, ReallocationEntry> // entryId -> entry
->;
-
-/** /Dispatch 节点的原始结构：底盘号 -> 行 */
-export type DispatchData = Record<string, DispatchEntry>;
-
-/** /schedule 节点：只用到 Chassis 与 Regent Production */
-export type ScheduleData = Array<{
-  Chassis: string;
-  "Regent Production": string;
-  [key: string]: any;
-}>;
-
-/** 处理后的调拨行：带 chassis 与 entryId */
+/** 处理后的 Reallocation 项（带 chassisNumber / entryId 等） */
 export interface ProcessedReallocationEntry extends ReallocationEntry {
   chassisNumber: string;
-  entryId: string;
+  entryId?: string;
+  regentProduction?: string;
 }
+
+/** /reallocation 的数据结构：按 Chassis → EntryId 映射 */
+export type ReallocationData = Record<string, Record<string, ReallocationEntry>>;
+
+/** ----------------------------
+ *  Schedule（/schedule）类型
+ * ----------------------------- */
+
+export interface ScheduleEntry {
+  Chassis: string;
+  "Regent Production"?: string;
+  // 允许透传其它字段
+  [k: string]: any;
+}
+
+export type ScheduleData = ScheduleEntry[];
+
+/** ----------------------------
+ *  Dispatch（/Dispatch）集合类型
+ * ----------------------------- */
+
+export type DispatchData = Record<string, DispatchEntry>;

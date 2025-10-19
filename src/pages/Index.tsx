@@ -1,3 +1,4 @@
+// src/pages/Index.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
   fetchDispatchData,
@@ -6,102 +7,121 @@ import {
   processDispatchData,
   processReallocationData,
   getDispatchStats,
-  filterDispatchData,
+  subscribeDispatch,
+  subscribeReallocation,
 } from "@/lib/firebase";
-import { DispatchData, ReallocationData, ScheduleData, ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
+import {
+  DispatchData,
+  ReallocationData,
+  ScheduleData,
+  ProcessedDispatchEntry,
+  ProcessedReallocationEntry,
+} from "@/types";
 import { DispatchStats, DispatchTable, ReallocationTable } from "@/components/DataTables";
+import { Button } from "@/components/ui/button";
 
 const IndexPage: React.FC = () => {
-  // ---------- 原始数据 ----------
+  // 原始数据
   const [dispatchRaw, setDispatchRaw] = useState<DispatchData>({});
   const [reallocRaw, setReallocRaw] = useState<ReallocationData>({});
   const [schedule, setSchedule] = useState<ScheduleData>([]);
 
-  // ---------- UI 状态 ----------
+  // 处理后数据
+  const [dispatchProcessed, setDispatchProcessed] = useState<ProcessedDispatchEntry[]>([]);
+  const [reallocProcessed, setReallocProcessed] = useState<ProcessedReallocationEntry[]>([]);
+
+  // UI 状态
   const [search, setSearch] = useState("");
-  // 关键：定义 filter，避免 “filter is not defined”
-  const [filter, setFilter] = useState<"all" | "invalid" | "snowy" | "canBeDispatched" | "onHold">("all");
-  const [loading, setLoading] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold'>("all");
+  const [loading, setLoading] = useState<boolean>(true);
+  const [showReallocation, setShowReallocation] = useState<boolean>(false); // 默认隐藏
 
-  // ---------- 拉取数据 ----------
-  const loadAll = async () => {
-    setLoading(true);
-    try {
-      const [d, r, s] = await Promise.all([
-        fetchDispatchData(),
-        fetchReallocationData(),
-        fetchScheduleData(),
-      ]);
-      setDispatchRaw(d || {});
-      setReallocRaw(r || {});
-      setSchedule(s || []);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // 顶部统计
+  const stats = useMemo(() => getDispatchStats(dispatchRaw, reallocRaw), [dispatchRaw, reallocRaw]);
 
+  // 初次加载 + 订阅
   useEffect(() => {
-    loadAll();
+    let unsubDispatch: (() => void) | null = null;
+    let unsubRealloc: (() => void) | null = null;
+
+    (async () => {
+      setLoading(true);
+      try {
+        const [d, r, s] = await Promise.all([
+          fetchDispatchData(),
+          fetchReallocationData(),
+          fetchScheduleData(),
+        ]);
+        setDispatchRaw(d || {});
+        setReallocRaw(r || {});
+        setSchedule(s || []);
+      } finally {
+        setLoading(false);
+      }
+
+      unsubDispatch = subscribeDispatch((d) => setDispatchRaw(d || {}));
+      unsubRealloc = subscribeReallocation((r) => setReallocRaw(r || {}));
+    })();
+
+    return () => {
+      unsubDispatch && unsubDispatch();
+      unsubRealloc && unsubRealloc();
+    };
   }, []);
 
-  // ---------- 处理数据 ----------
-  const reallocProcessed: ProcessedReallocationEntry[] = useMemo(
-    () => processReallocationData(reallocRaw, schedule),
-    [reallocRaw, schedule]
-  );
+  // derive 处理数据
+  useEffect(() => {
+    setDispatchProcessed(processDispatchData(dispatchRaw, reallocRaw));
+  }, [dispatchRaw, reallocRaw]);
 
-  const dispatchProcessed: ProcessedDispatchEntry[] = useMemo(
-    () => processDispatchData(dispatchRaw, reallocRaw),
-    [dispatchRaw, reallocRaw]
-  );
-
-  // 顶部统计（含 onHold）
-  const stats = useMemo(
-    () => getDispatchStats(dispatchRaw, reallocRaw),
-    [dispatchRaw, reallocRaw]
-  );
-
-  // 根据顶部筛选卡片决定主表数据（注意：filterDispatchData 需要原始 reallocationData）
-  const visibleDispatch: ProcessedDispatchEntry[] = useMemo(
-    () => filterDispatchData(dispatchProcessed, filter, reallocRaw),
-    [dispatchProcessed, filter, reallocRaw]
-  );
+  useEffect(() => {
+    setReallocProcessed(processReallocationData(reallocRaw, schedule));
+  }, [reallocRaw, schedule]);
 
   return (
-    <div className="p-4 md:p-6 w-full max-w-full overflow-x-hidden space-y-6">
-      {/* 顶部统计卡片（新增 onHold） */}
-      <DispatchStats
-        total={stats.total}
-        invalidStock={stats.invalidStock}
-        snowyStock={stats.snowyStock}
-        canBeDispatched={stats.canBeDispatched}
-        onHold={stats.onHold}                 // ✅ 显示 On Hold 数量
-        activeFilter={filter}
-        onFilterChange={setFilter}            // ✅ 点击卡片切换过滤
-        onRefresh={loadAll}
-      />
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 overflow-x-hidden">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6">
+        <header className="space-y-1">
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-gray-900">Dispatch Dashboard</h1>
+          <p className="text-sm text-gray-600">Operational overview | realtime updates</p>
+        </header>
 
-      {/* 发运主表（两行一组 + 白灰分隔；无横向滚动；支持 OnHold/Comment/Pickup 实时写库） */}
-      <DispatchTable
-        data={visibleDispatch}                // ✅ 已按 filter 过滤后的数据
-        allData={dispatchProcessed}           // 用于乐观层对齐
-        filter={filter}                       // ✅ 传入，避免未定义
-        searchTerm={search}
-        onSearchChange={setSearch}
-        reallocationData={reallocProcessed}   // 表格里做联动搜索展示
-      />
+        <DispatchStats
+          total={stats.total}
+          invalidStock={stats.invalidStock}
+          snowyStock={stats.snowyStock}
+          canBeDispatched={stats.canBeDispatched}
+          onHold={stats.onHold}
+          activeFilter={activeFilter}
+          onFilterChange={setActiveFilter}
+          onRefresh={() => { /* 实时订阅，无需手动 refresh */ }}
+        />
 
-      {/* 调拨表（如你首页需要保留） */}
-      <ReallocationTable
-        data={reallocProcessed}
-        searchTerm={search}
-        onSearchChange={setSearch}
-        dispatchData={dispatchProcessed}
-      />
+        {/* 传全量，表格内部自行筛选/排序/搜索，保证 OnHold 即时分流 */}
+        <DispatchTable
+          allData={dispatchProcessed}
+          activeFilter={activeFilter}
+          searchTerm={search}
+          onSearchChange={setSearch}
+          reallocationData={reallocProcessed}
+        />
 
-      {loading && (
-        <div className="text-sm text-gray-500">Loading...</div>
-      )}
+        {/* Reallocation 默认隐藏 */}
+        <div className="pt-2">
+          <Button variant="outline" onClick={() => setShowReallocation((s) => !s)}>
+            {showReallocation ? "Hide Reallocation" : "Show Reallocation"}
+          </Button>
+        </div>
+        {showReallocation && (
+          <ReallocationTable
+            data={reallocProcessed}
+            searchTerm={search}
+            onSearchChange={setSearch}
+            dispatchData={dispatchProcessed}
+          />
+        )}
+      </div>
+      {loading && <div className="text-sm text-gray-500 mt-4">Loading...</div>}
     </div>
   );
 };

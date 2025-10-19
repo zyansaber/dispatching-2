@@ -1,6 +1,14 @@
 // src/lib/firebase.ts
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, get, push, update } from "firebase/database";
+import {
+  getDatabase,
+  ref,
+  get,
+  push,
+  update,
+  onValue,
+  off,
+} from "firebase/database";
 import {
   ReallocationData,
   DispatchData,
@@ -13,11 +21,12 @@ import {
 const firebaseConfig = {
   apiKey: "AIzaSyBcczqGj5X1_w9aCX1lOK4-kgz49Oi03Bg",
   authDomain: "scheduling-dd672.firebaseapp.com",
-  databaseURL: "https://scheduling-dd672-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL:
+    "https://scheduling-dd672-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "scheduling-dd672",
   storageBucket: "scheduling-dd672.firebasestorage.app",
   messagingSenderId: "432092773012",
-  appId: "1:432092773012:web:ebc7203ea570b0da2ad281"
+  appId: "1:432092773012:web:ebc7203ea570b0da2ad281",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -50,8 +59,14 @@ const parseDDMMYYYY = (dateString: string | undefined): Date => {
   const month = parseInt(parts[1], 10) - 1;
   const year = parseInt(parts[2], 10);
   if (
-    isNaN(day) || isNaN(month) || isNaN(year) ||
-    day < 1 || day > 31 || month < 0 || month > 11 || year < 1900
+    isNaN(day) ||
+    isNaN(month) ||
+    isNaN(year) ||
+    day < 1 ||
+    day > 31 ||
+    month < 0 ||
+    month > 11 ||
+    year < 1900
   ) {
     return new Date(0);
   }
@@ -89,8 +104,26 @@ export const fetchScheduleData = async (): Promise<ScheduleData> => {
   }
 };
 
+// -------------------- 实时订阅 --------------------
+export function subscribeDispatch(onChange: (data: DispatchData) => void) {
+  const r = ref(db, "Dispatch");
+  const cb = onValue(r, (snap) => onChange((snap.val() || {}) as DispatchData));
+  return () => off(r, "value", cb);
+}
+
+export function subscribeReallocation(onChange: (data: ReallocationData) => void) {
+  const r = ref(db, "reallocation");
+  const cb = onValue(r, (snap) =>
+    onChange((snap.val() || {}) as ReallocationData)
+  );
+  return () => off(r, "value", cb);
+}
+
 // -------------------- 业务辅助 --------------------
-export const reportError = async (chassisNo: string, errorDetails: string): Promise<boolean> => {
+export const reportError = async (
+  chassisNo: string,
+  errorDetails: string
+): Promise<boolean> => {
   try {
     const errorData = {
       chassisNo,
@@ -121,7 +154,6 @@ export const processReallocationData = (
     const entryIds = Object.keys(entries);
     if (!entryIds.length) return;
 
-    // 取最新
     const latestEntryId = entryIds.reduce((latest, current) => {
       const latestDate = parseDDMMYYYY(entries[latest].date || entries[latest].submitTime);
       const currentDate = parseDDMMYYYY(entries[current].date || entries[current].submitTime);
@@ -129,9 +161,8 @@ export const processReallocationData = (
     });
 
     const latestEntry = entries[latestEntryId];
-
-    // 如果已完成生产则略过
     const regentProduction = chassisToRegentProduction.get(chassisNumber);
+
     if (regentProduction === "Finished") return;
 
     processed.push({
@@ -151,11 +182,16 @@ export const validateDealerCheck = (
   reallocatedTo: string | undefined
 ): string => {
   if (
-    sapData && scheduledDealer && reallocatedTo &&
-    sapData === scheduledDealer && scheduledDealer === reallocatedTo
-  ) return "OK";
+    sapData &&
+    scheduledDealer &&
+    reallocatedTo &&
+    sapData === scheduledDealer &&
+    scheduledDealer === reallocatedTo
+  )
+    return "OK";
 
-  if (sapData && scheduledDealer && sapData === scheduledDealer && !reallocatedTo) return "OK";
+  if (sapData && scheduledDealer && sapData === scheduledDealer && !reallocatedTo)
+    return "OK";
 
   return "Mismatch";
 };
@@ -177,7 +213,10 @@ export const processDispatchData = (
       return currentDate > latestDate ? current : latest;
     });
 
-    chassisToReallocatedTo.set(chassisNumber, entries[latestEntryId].reallocatedTo || "");
+    chassisToReallocatedTo.set(
+      chassisNumber,
+      entries[latestEntryId].reallocatedTo || ""
+    );
   });
 
   Object.entries(dispatchData).forEach(([chassisNo, entry]) => {
@@ -188,6 +227,7 @@ export const processDispatchData = (
       reallocatedTo
     );
     processed.push({
+      "Chassis No": entry["Chassis No"] || chassisNo, // 注入主键，防止库里没存该字段时报错
       ...entry,
       DealerCheck: validatedDealerCheck,
       ...(reallocatedTo ? { reallocatedTo } : {}),
@@ -197,7 +237,10 @@ export const processDispatchData = (
   return processed;
 };
 
-const isSnowyStock = (entry: ProcessedDispatchEntry, chassisToReallocatedTo: Map<string, string>) => {
+const isSnowyStock = (
+  entry: ProcessedDispatchEntry,
+  chassisToReallocatedTo: Map<string, string>
+) => {
   const reallocatedTo = chassisToReallocatedTo.get(entry["Chassis No"]);
   if (reallocatedTo === "Snowy Stock") return true;
   return (
@@ -208,12 +251,15 @@ const isSnowyStock = (entry: ProcessedDispatchEntry, chassisToReallocatedTo: Map
   );
 };
 
-export const getDispatchStats = (dispatchData: DispatchData, reallocationData: ReallocationData) => {
+export const getDispatchStats = (
+  dispatchData: DispatchData,
+  reallocationData: ReallocationData
+) => {
   const entries = Object.values(dispatchData);
   const total = entries.length;
   const okStatus = entries.filter((e) => e.Statuscheck === "OK").length;
   const invalidStock = entries.filter((e) => e.Statuscheck !== "OK").length;
-  const onHold = entries.filter((e) => e.OnHold === true).length; // ✅ 新增：On Hold
+  const onHold = entries.filter((e) => e.OnHold === true).length;
 
   const chassisToReallocatedTo = new Map<string, string>();
   Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
@@ -224,7 +270,10 @@ export const getDispatchStats = (dispatchData: DispatchData, reallocationData: R
       const currentDate = parseDDMMYYYY(entryObj[current].date || entryObj[current].submitTime);
       return currentDate > latestDate ? current : latest;
     });
-    chassisToReallocatedTo.set(chassisNumber, entryObj[latestEntryId].reallocatedTo || "");
+    chassisToReallocatedTo.set(
+      chassisNumber,
+      entryObj[latestEntryId].reallocatedTo || ""
+    );
   });
 
   const processedEntries = entries.map((entry) => {
@@ -237,12 +286,21 @@ export const getDispatchStats = (dispatchData: DispatchData, reallocationData: R
     return { ...entry, DealerCheck: validatedDealerCheck, reallocatedTo };
   });
 
-  const snowyStock = processedEntries.filter((e) => isSnowyStock(e, chassisToReallocatedTo)).length;
+  const snowyStock = processedEntries.filter((e) =>
+    isSnowyStock(e, chassisToReallocatedTo)
+  ).length;
   const canBeDispatched = processedEntries.filter(
     (e) => e.Statuscheck === "OK" && !isSnowyStock(e, chassisToReallocatedTo)
   ).length;
 
-  return { total, okStatus, invalidStock, snowyStock, canBeDispatched, onHold };
+  return {
+    total,
+    okStatus,
+    invalidStock,
+    snowyStock,
+    canBeDispatched,
+    onHold,
+  };
 };
 
 export const filterDispatchData = (
@@ -251,9 +309,8 @@ export const filterDispatchData = (
   reallocationData: ReallocationData
 ): ProcessedDispatchEntry[] => {
   if (filter === "all") return data;
-  if (filter === "ok") return data.filter((e) => e.Statuscheck === "OK");
   if (filter === "invalid") return data.filter((e) => e.Statuscheck !== "OK");
-  if (filter === "onHold") return data.filter((e) => e.OnHold === true); // ✅ 新增：onHold 过滤
+  if (filter === "onHold") return data.filter((e) => e.OnHold === true);
 
   const chassisToReallocatedTo = new Map<string, string>();
   Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
@@ -264,14 +321,26 @@ export const filterDispatchData = (
       const currentDate = parseDDMMYYYY(entryObj[current].date || entryObj[current].submitTime);
       return currentDate > latestDate ? current : latest;
     });
-    chassisToReallocatedTo.set(chassisNumber, entryObj[latestEntryId].reallocatedTo || "");
+    chassisToReallocatedTo.set(
+      chassisNumber,
+      entryObj[latestEntryId].reallocatedTo || ""
+    );
   });
 
   if (filter === "snowy") {
-    return data.filter((e) => isSnowyStock(e, chassisToReallocatedTo));
+    return data.filter(
+      (e) =>
+        e.reallocatedTo === "Snowy Stock" ||
+        e["Scheduled Dealer"] === "Snowy Stock"
+    );
   }
   if (filter === "canBeDispatched") {
-    return data.filter((e) => e.Statuscheck === "OK" && !isSnowyStock(e, chassisToReallocatedTo));
+    return data.filter(
+      (e) =>
+        e.Statuscheck === "OK" &&
+        !(e.reallocatedTo === "Snowy Stock" ||
+          e["Scheduled Dealer"] === "Snowy Stock")
+    );
   }
   return data;
 };

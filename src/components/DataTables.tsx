@@ -4,59 +4,62 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowUpDown, AlertTriangle, Mail, RefreshCw } from "lucide-react";
+import { ArrowUpDown, AlertTriangle, Mail } from "lucide-react";
 import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
-import { sendReportEmail, EmailData } from "@/lib/emailjs";
 import { toast } from "sonner";
 
-/* -------- 通用样式，防横向溢出 -------- */
-const CELL = "text-sm whitespace-pre-wrap break-words break-all hyphens-auto";
+// 可选：如果你没有 / 不想用邮件，提供一个兜底的 no-op
+let sendReportEmail: (data: any) => Promise<boolean>;
+try {
+  // 按你项目实际存在的模块路径来
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  sendReportEmail = require("@/lib/emailjs").sendReportEmail;
+} catch {
+  sendReportEmail = async () => false;
+}
 
-/* ====================== 顶部统计卡片（含 On Hold） ====================== */
+/* -------- 通用样式，防横向溢出 -------- */
+const CELL = "text-sm leading-5 whitespace-pre-wrap break-words break-all hyphens-auto";
+
+/* ====================== 顶部统计卡片 ====================== */
 interface DispatchStatsProps {
   total: number;
   invalidStock: number;
   snowyStock: number;
   canBeDispatched: number;
   onHold?: number;
-  onFilterChange: (filter: string) => void;
-  activeFilter: string;
+  onFilterChange: (filter: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold') => void;
+  activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
   onRefresh: () => void;
 }
 
 export const DispatchStats: React.FC<DispatchStatsProps> = ({
   total, invalidStock, snowyStock, canBeDispatched, onHold,
-  onFilterChange, activeFilter, onRefresh
+  onFilterChange, activeFilter = "all", onRefresh
 }) => {
   const cards = [
     { label: "Total", value: total, filter: "all", color: "text-blue-600" },
     { label: "Invalid", value: invalidStock, filter: "invalid", color: "text-red-600" },
     { label: "Snowy Stock", value: snowyStock, filter: "snowy", color: "text-purple-600" },
     { label: "Can Dispatch", value: canBeDispatched, filter: "canBeDispatched", color: "text-emerald-600" },
-    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold", color: "text-amber-600" }] : []),
-  ];
+    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold", color: "text-amber-600" } as const] : []),
+  ] as const;
 
   return (
     <div className="space-y-4 w-full max-w-full overflow-x-hidden">
-      <div className="flex justify-end">
-        <Button onClick={onRefresh} variant="outline" className="flex items-center gap-2">
-          <RefreshCw className="h-4 w-4" />
-          <span>Refresh</span>
-        </Button>
-      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {cards.map((card) => (
           <Card
             key={card.filter}
             className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === card.filter ? "ring-2 ring-blue-500" : ""}`}
-            onClick={() => onFilterChange(card.filter)}
+            onClick={() => onFilterChange(card.filter as any)}
           >
             <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-gray-600 truncate">{card.label}</CardTitle>
+              <CardTitle className="text-[13px] font-medium text-gray-600 truncate">{card.label}</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
+              <div className={`text-2xl font-semibold ${card.color}`}>{card.value}</div>
             </CardContent>
           </Card>
         ))}
@@ -65,18 +68,17 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== 主表（两行一组 + 美化 + 无横滚） ====================== */
+/* ====================== 主表：全量 + 两行一组 + 乐观 onHold ====================== */
 interface DispatchTableProps {
-  data: ProcessedDispatchEntry[];
+  allData: ProcessedDispatchEntry[];                          // 总是全量
+  activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
   searchTerm: string;
   onSearchChange: (term: string) => void;
-  filter: string;
-  allData: ProcessedDispatchEntry[];
   reallocationData: ProcessedReallocationEntry[];
 }
 
 export const DispatchTable: React.FC<DispatchTableProps> = ({
-  data, searchTerm, onSearchChange, filter, allData, reallocationData
+  allData, activeFilter = "all", searchTerm, onSearchChange, reallocationData
 }) => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc'; } | null>(null);
   const [sendingEmail, setSendingEmail] = useState<string | null>(null);
@@ -85,16 +87,12 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [pickupDraft, setPickupDraft]   = useState<Record<string, string>>({});
 
-  // 乐观更新
+  // 乐观更新容器
   const [optimistic, setOptimistic]     = useState<Record<string, Partial<ProcessedDispatchEntry>>>({});
   const [saving, setSaving]             = useState<Record<string, boolean>>({});
   const [error, setError]               = useState<Record<string, string | undefined>>({});
 
-  const applyOptimistic = (id: string, patch: Partial<ProcessedDispatchEntry>) => {
-    setOptimistic((m) => ({ ...m, [id]: { ...(m[id] || {}), ...patch } }));
-  };
-
-  // 父数据同步时，清理已一致的乐观覆盖
+  // 外部数据变化时，清理已落盘的乐观覆盖
   useEffect(() => {
     if (!allData?.length) return;
     setOptimistic((cur) => {
@@ -103,11 +101,11 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         const base = allData.find(e => e["Chassis No"] === id);
         if (!base) continue;
         const p = cur[id];
-        const match =
+        const inSync =
           (p.OnHold === undefined || p.OnHold === base.OnHold) &&
           (p.Comment === undefined || p.Comment === base.Comment) &&
           (p.EstimatedPickupAt === undefined || p.EstimatedPickupAt === base.EstimatedPickupAt);
-        if (match) delete next[id];
+        if (inSync) delete next[id];
       }
       return next;
     });
@@ -119,181 +117,162 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     setSortConfig({ key, direction });
   };
 
-  const safeStringIncludes = (value: any, s: string) =>
-    value !== null && value !== undefined && String(value).toLowerCase().includes(s);
+  const safeIncludes = (v: any, s: string) => v != null && String(v).toLowerCase().includes(s);
 
-  // 合并乐观层
-  const mergedAll = useMemo(() => {
+  // —— 统一从全量 + 乐观层做筛选/排序，确保点击 OnHold 立即分流 —— //
+  const baseMerged = useMemo(() => {
     const map: Record<string, ProcessedDispatchEntry> = {};
     for (const e of allData) map[e["Chassis No"]] = { ...e, ...(optimistic[e["Chassis No"]] || {}) };
     return Object.values(map);
   }, [allData, optimistic]);
 
-  // 过滤 + 排序 + 搜索
-  const filteredAndSortedData = useMemo(() => {
-    const searchLower = (searchTerm || "").toLowerCase();
-    const base = (data.length ? data : allData).map(e => ({ ...e, ...(optimistic[e["Chassis No"]] || {}) }));
+  const filtered = useMemo(() => {
+    const s = (searchTerm || "").toLowerCase();
+    let arr = baseMerged;
+    // filter（在组件内自己处理，不依赖父组件重新过滤）
+    if (activeFilter === "invalid")   arr = arr.filter(e => e.Statuscheck !== "OK");
+    if (activeFilter === "onHold")    arr = arr.filter(e => e.OnHold === true);
+    if (activeFilter === "snowy")     arr = arr.filter(e => e.reallocatedTo === "Snowy Stock" || e["Scheduled Dealer"] === "Snowy Stock");
+    if (activeFilter === "canBeDispatched") arr = arr.filter(e => e.Statuscheck === "OK" && !(e.reallocatedTo === "Snowy Stock" || e["Scheduled Dealer"] === "Snowy Stock"));
 
-    let filtered = searchTerm
-      ? base.filter(entry => {
-          const dispatchMatch = (
-            safeStringIncludes(entry["Chassis No"], searchLower) ||
-            safeStringIncludes(entry.Customer, searchLower) ||
-            safeStringIncludes(entry.Model, searchLower) ||
-            safeStringIncludes(entry["Matched PO No"], searchLower) ||
-            safeStringIncludes(entry["SAP Data"], searchLower) ||
-            safeStringIncludes(entry["Scheduled Dealer"], searchLower) ||
-            safeStringIncludes(entry.Code, searchLower) ||
-            safeStringIncludes(entry.Statuscheck, searchLower) ||
-            safeStringIncludes(entry.DealerCheck, searchLower) ||
-            safeStringIncludes(entry.reallocatedTo, searchLower) ||
-            safeStringIncludes(entry.Comment, searchLower) ||
-            safeStringIncludes(entry.EstimatedPickupAt, searchLower)
-          );
-          const reallocationMatch = reallocationData.some(re =>
-            re.chassisNumber === entry["Chassis No"] && (
-              safeStringIncludes(re.chassisNumber, searchLower) ||
-              safeStringIncludes(re.customer, searchLower) ||
-              safeStringIncludes(re.model, searchLower) ||
-              safeStringIncludes(re.originalDealer, searchLower) ||
-              safeStringIncludes(re.reallocatedTo, searchLower) ||
-              safeStringIncludes(re.regentProduction, searchLower) ||
-              safeStringIncludes(re.issue?.type, searchLower)
-            )
-          );
-          return dispatchMatch || reallocationMatch;
-        })
-      : base;
-
-    if (sortConfig) {
-      filtered = [...filtered].sort((a, b) => {
-        const aValue = a[sortConfig.key as keyof ProcessedDispatchEntry];
-        const bValue = b[sortConfig.key as keyof ProcessedDispatchEntry];
-        if (sortConfig.key === "GR to GI Days") {
-          return sortConfig.direction === 'asc'
-            ? (Number(aValue) || 0) - (Number(bValue) || 0)
-            : (Number(bValue) || 0) - (Number(aValue) || 0);
-        }
-        const aStr = String(aValue ?? '').toLowerCase();
-        const bStr = String(bValue ?? '').toLowerCase();
-        return sortConfig.direction === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+    if (s) {
+      arr = arr.filter(entry => {
+        const d = entry;
+        const reMatch = reallocationData.some(re =>
+          re.chassisNumber === d["Chassis No"] &&
+          (safeIncludes(re.customer, s) || safeIncludes(re.model, s) || safeIncludes(re.reallocatedTo, s) || safeIncludes(re.issue?.type, s))
+        );
+        return (
+          safeIncludes(d["Chassis No"], s) ||
+          safeIncludes(d.Customer, s) ||
+          safeIncludes(d.Model, s) ||
+          safeIncludes(d["Matched PO No"], s) ||
+          safeIncludes(d["SAP Data"], s) ||
+          safeIncludes(d["Scheduled Dealer"], s) ||
+          safeIncludes(d.Code, s) ||
+          safeIncludes(d.Statuscheck, s) ||
+          safeIncludes(d.DealerCheck, s) ||
+          safeIncludes(d.reallocatedTo, s) ||
+          safeIncludes(d.Comment, s) ||
+          safeIncludes(d.EstimatedPickupAt, s) ||
+          reMatch
+        );
       });
     }
-    return filtered;
-  }, [data, allData, optimistic, searchTerm, sortConfig, reallocationData]);
 
-  // 主表 & On Hold
-  const activeRows = filteredAndSortedData.filter(e => !e.OnHold);
-  const onHoldRows  = filteredAndSortedData.filter(e => e.OnHold);
+    if (sortConfig) {
+      const { key, direction } = sortConfig;
+      arr = [...arr].sort((a: any, b: any) => {
+        const av = a[key], bv = b[key];
+        if (key === "GR to GI Days") {
+          return direction === 'asc' ? (Number(av)||0) - (Number(bv)||0) : (Number(bv)||0) - (Number(av)||0);
+        }
+        return direction === 'asc'
+          ? String(av ?? '').localeCompare(String(bv ?? ''), undefined, { sensitivity: "base" })
+          : String(bv ?? '').localeCompare(String(av ?? ''), undefined, { sensitivity: "base" });
+      });
+    }
+    return arr;
+  }, [baseMerged, searchTerm, activeFilter, sortConfig, reallocationData]);
 
-  const maxGRDays = Math.max(...mergedAll.map(entry => entry["GR to GI Days"] || 0), 1);
+  const activeRows = filtered.filter(e => !e.OnHold);
+  const onHoldRows = filtered.filter(e =>  e.OnHold);
+
+  const maxGRDays = Math.max(...baseMerged.map(e => e["GR to GI Days"] || 0), 1);
 
   // 日期工具
-  const isoToDatetimeLocal = (iso?: string | null) => {
+  const isoToLocal = (iso?: string | null) => {
     if (!iso) return "";
     const d = new Date(iso);
     const pad = (n: number) => n.toString().padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
-  const datetimeLocalToIso = (v: string) => (v ? new Date(v).toISOString() : null);
-  const minDatetimeLocalNow = () => {
+  const localToIso = (v: string) => (v ? new Date(v).toISOString() : null);
+  const minLocalNow = useMemo(() => {
     const now = new Date();
     const pad = (n: number) => n.toString().padStart(2, "0");
     return `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  };
-  const minDT = useMemo(minDatetimeLocalNow, []);
+  }, []);
 
   // 写库（乐观 + 回滚）
+  const applyOptimistic = (id: string, patch: Partial<ProcessedDispatchEntry>) =>
+    setOptimistic((m) => ({ ...m, [id]: { ...(m[id] || {}), ...patch } }));
+
   const handleToggleOnHold = async (row: ProcessedDispatchEntry, next: boolean) => {
     const id = row["Chassis No"];
     const patch = { OnHold: next, OnHoldAt: new Date().toISOString(), OnHoldBy: "webapp" as const };
-    applyOptimistic(id, patch);
-    setSaving((s) => ({ ...s, [id]: true }));
-    setError((e) => ({ ...e, [id]: undefined }));
+    applyOptimistic(id, patch);                         // 立刻在本地变更（行会马上移动到 On Hold 卡片）
+    setSaving(s => ({ ...s, [id]: true }));
+    setError(e => ({ ...e, [id]: undefined }));
     try {
-      await patchDispatch(id, patch);
+      await patchDispatch(id, patch);                   // 后台落库；实时订阅也会同步回来
     } catch (err: any) {
-      setOptimistic((m) => {
-        const prev = { ...(m[id] || {}) };
-        delete prev.OnHold; delete prev.OnHoldAt; delete prev.OnHoldBy;
+      // 回滚
+      setOptimistic(m => {
+        const prev = { ...(m[id] || {}) }; delete prev.OnHold; delete prev.OnHoldAt; delete prev.OnHoldBy;
         return { ...m, [id]: prev };
       });
-      setError((e) => ({ ...e, [id]: err?.message || "Update failed" }));
+      setError(e => ({ ...e, [id]: err?.message || "Update failed" }));
     } finally {
-      setSaving((s) => ({ ...s, [id]: false }));
+      setSaving(s => ({ ...s, [id]: false }));
     }
   };
 
   const handleSaveComment = async (row: ProcessedDispatchEntry) => {
     const id = row["Chassis No"];
-    const value = commentDraft[id] ?? row.Comment ?? ""; // 允许空字符串保存
+    const value = commentDraft[id] ?? row.Comment ?? "";
     applyOptimistic(id, { Comment: value });
-    setSaving((s) => ({ ...s, [id]: true }));
-    setError((e) => ({ ...e, [id]: undefined }));
+    setSaving(s => ({ ...s, [id]: true }));
+    setError(e => ({ ...e, [id]: undefined }));
     try {
       await patchDispatch(id, { Comment: value });
     } catch (err: any) {
-      setOptimistic((m) => {
-        const prev = { ...(m[id] || {}) };
-        delete prev.Comment;
-        return { ...m, [id]: prev };
-      });
-      setError((e) => ({ ...e, [id]: err?.message || "Update failed" }));
+      setOptimistic(m => { const p = { ...(m[id] || {}) }; delete p.Comment; return { ...m, [id]: p }; });
+      setError(e => ({ ...e, [id]: err?.message || "Update failed" }));
     } finally {
-      setSaving((s) => ({ ...s, [id]: false }));
+      setSaving(s => ({ ...s, [id]: false }));
     }
   };
 
   const handleSavePickup = async (row: ProcessedDispatchEntry) => {
     const id = row["Chassis No"];
-    const localVal = pickupDraft[id] ?? isoToDatetimeLocal(row.EstimatedPickupAt);
+    const localVal = pickupDraft[id] ?? isoToLocal(row.EstimatedPickupAt);
     if (localVal) {
       const picked = new Date(localVal);
       if (picked < new Date()) {
-        setError((e) => ({ ...e, [id]: "Pick-up time must be today or later" }));
+        setError(e => ({ ...e, [id]: "Pick-up time must be today or later" }));
         return;
       }
     }
-    const iso = localVal ? datetimeLocalToIso(localVal) : null;
+    const iso = localVal ? localToIso(localVal) : null;
     applyOptimistic(id, { EstimatedPickupAt: iso });
-    setSaving((s) => ({ ...s, [id]: true }));
-    setError((e) => ({ ...e, [id]: undefined }));
+    setSaving(s => ({ ...s, [id]: true }));
+    setError(e => ({ ...e, [id]: undefined }));
     try {
       await patchDispatch(id, { EstimatedPickupAt: iso });
     } catch (err: any) {
-      setOptimistic((m) => {
-        const prev = { ...(m[id] || {}) };
-        delete prev.EstimatedPickupAt;
-        return { ...m, [id]: prev };
-      });
-      setError((e) => ({ ...e, [id]: err?.message || "Update failed" }));
+      setOptimistic(m => { const p = { ...(m[id] || {}) }; delete p.EstimatedPickupAt; return { ...m, [id]: p }; });
+      setError(e => ({ ...e, [id]: err?.message || "Update failed" }));
     } finally {
-      setSaving((s) => ({ ...s, [id]: false }));
+      setSaving(s => ({ ...s, [id]: false }));
     }
   };
 
-  // 报告邮件
   const handleReportError = async (chassisNo: string) => {
-    const entry = mergedAll.find(e => e["Chassis No"] === chassisNo);
+    const entry = baseMerged.find(e => e["Chassis No"] === chassisNo);
     if (!entry) return;
     setSendingEmail(chassisNo);
     try {
-      const emailData: EmailData = {
+      const ok = await sendReportEmail({
         chassisNo: entry["Chassis No"],
         sapData: entry["SAP Data"] || "N/A",
         scheduledDealer: entry["Scheduled Dealer"] || "N/A",
         reallocatedTo: entry.reallocatedTo || "No Reallocation",
-      };
-      const emailSent = await sendReportEmail(emailData);
-      if (emailSent) {
-        const errorDetails = `Dealer Check Mismatch - SAP Data: ${entry["SAP Data"] || "N/A"}, Scheduled Dealer: ${entry["Scheduled Dealer"] || "N/A"}, Reallocation To: ${entry.reallocatedTo || "N/A"}`;
-        await reportError(chassisNo, errorDetails);
-        toast.success(`Report sent for ${chassisNo}.`);
-      } else {
-        toast.error("Failed to send email report.");
-      }
-    } catch (error) {
-      console.error("Error sending report:", error);
+      });
+      if (ok) toast.success(`Report sent for ${chassisNo}.`);
+      else toast.error("Failed to send email report.");
+      await reportError(chassisNo, "Dealer check mismatch");
+    } catch {
       toast.error("Failed to send report.");
     } finally {
       setSendingEmail(null);
@@ -311,18 +290,16 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   return (
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
-      {/* 主表（未 On Hold） */}
+      {/* 主表 */}
       <Card className="w-full max-w-full">
         <CardHeader>
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-            <CardTitle className="text-lg">
-              Dispatch Data {filter !== 'all' && `(${filter === 'canBeDispatched' ? 'Can be Dispatched' : filter.charAt(0).toUpperCase() + filter.slice(1)})`}
-            </CardTitle>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <CardTitle className="text-lg font-semibold tracking-tight">Dispatch Data</CardTitle>
             <Input
-              placeholder="Search all fields..."
+              placeholder="Search chassis / dealer / PO / comment ..."
               value={searchTerm}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full sm:max-w-sm"
+              className="w-full md:max-w-sm"
             />
           </div>
         </CardHeader>
@@ -332,7 +309,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
             <Table className="w-full table-fixed">
               <TableHeader>
                 <TableRow>
-                  <SortableHeader sortKey="Chassis No">Chassis No</SortableHeader>
+                  <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
                   <SortableHeader sortKey="GR to GI Days">GR Days</SortableHeader>
                   <SortableHeader sortKey="Customer">Customer</SortableHeader>
                   <SortableHeader sortKey="Model">Model</SortableHeader>
@@ -352,24 +329,23 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                 {activeRows.map((entry, idx) => {
                   const id = entry["Chassis No"];
                   const barColor = getGRDaysColor(entry["GR to GI Days"] || 0);
-                  const barWidth = getGRDaysWidth(entry["GR to GI Days"] || 0, maxGRDays);
+                  const barWidth = getGRDaysWidth(entry["GR to GI Days"] || 0, Math.max(...baseMerged.map(e => e["GR to GI Days"] || 0), 1));
                   const isLoading = sendingEmail === id;
                   const rowBg = idx % 2 === 0 ? "bg-white" : "bg-gray-50";
 
                   const commentValue = commentDraft[id] ?? (entry.Comment ?? "");
-                  const pickupLocal  = pickupDraft[id]  ?? (entry.EstimatedPickupAt ? isoToDatetimeLocal(entry.EstimatedPickupAt) : "");
+                  const pickupLocal  = pickupDraft[id]  ?? (entry.EstimatedPickupAt ? isoToLocal(entry.EstimatedPickupAt) : "");
 
                   return (
                     <React.Fragment key={id}>
-                      {/* 第一行：核心字段 */}
+                      {/* 第一行 */}
                       <TableRow className={`align-top ${rowBg}`}>
                         <TableCell className={`font-medium ${CELL}`}>{id}</TableCell>
 
                         <TableCell className={CELL}>
                           <div className="space-y-1">
                             <div className="flex justify-between text-xs">
-                              <span>{entry["GR to GI Days"] ?? "-"}</span>
-                              <span className="text-gray-500">days</span>
+                              <span>{entry["GR to GI Days"] ?? "-"}</span><span className="text-gray-500">days</span>
                             </div>
                             <div className="w-full bg-gray-200 rounded-full h-1.5">
                               <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${barWidth}%` }} />
@@ -391,23 +367,21 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                             disabled={saving[id]}
                             onClick={() => handleToggleOnHold(entry, !entry.OnHold)}
                           >
-                            {entry.OnHold ? "Cancel On Hold" : "On Hold"}
+                            {entry.OnHold ? "Cancel" : "On Hold"}
                           </Button>
                         </TableCell>
 
                         <TableCell className={CELL}>
-                          <span className={`px-2 py-1 rounded-full text-xs ${entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                            {entry.Statuscheck}
+                          <span className={`px-2 py-1 rounded-full text-xs ${entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {entry.Statuscheck || "-"}
                           </span>
                         </TableCell>
                         <TableCell className={CELL}>
-                          <span className={`px-2 py-1 rounded-full text-xs ${entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                            {entry.DealerCheck}
+                          <span className={`px-2 py-1 rounded-full text-xs ${entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {entry.DealerCheck || "-"}
                           </span>
                         </TableCell>
-                        <TableCell className={`${CELL} font-medium text-blue-600`}>
-                          {entry.reallocatedTo || "-"}
-                        </TableCell>
+                        <TableCell className={`${CELL} font-medium text-blue-600`}>{entry.reallocatedTo || "-"}</TableCell>
 
                         <TableCell className="min-w-0">
                           <Button
@@ -422,13 +396,12 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* 第二行：扩展编辑区（Comment / Estimated pickup） */}
+                      {/* 第二行：编辑区 */}
                       <TableRow className={`${rowBg}`}>
                         <TableCell colSpan={13}>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 py-3">
-                            {/* Comment（允许空白保存） */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs text-gray-500 w-28 shrink-0">Comment</span>
+                              <span className="text-[13px] text-gray-500 w-28 shrink-0">Comment</span>
                               <Input
                                 className="w-full max-w-[320px]"
                                 placeholder="Add a comment"
@@ -441,13 +414,12 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </Button>
                             </div>
 
-                            {/* Estimated pickup time（今天以后） */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs text-gray-500 w-28 shrink-0">Estimated pickup</span>
+                              <span className="text-[13px] text-gray-500 w-28 shrink-0">Estimated pickup</span>
                               <input
                                 type="datetime-local"
                                 className="px-2 py-1 border rounded w-full max-w-[260px]"
-                                min={minDT}
+                                min={minLocalNow}
                                 value={pickupLocal}
                                 onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
                               />
@@ -468,7 +440,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 卡片区：响应式等宽 + 统一高度 + 无横滚 */}
+      {/* On Hold Board */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}
@@ -483,7 +455,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   );
 };
 
-/* ====================== On Hold 卡片（等高整齐） ====================== */
+/* ====================== On Hold 卡片：等高整齐 ====================== */
 const OnHoldBoard: React.FC<{
   rows: ProcessedDispatchEntry[];
   saving: Record<string, boolean>;
@@ -504,21 +476,18 @@ const OnHoldBoard: React.FC<{
   return (
     <Card className="w-full max-w-full overflow-x-hidden">
       <CardHeader>
-        <CardTitle className="text-lg">On Hold</CardTitle>
+        <CardTitle className="text-lg font-semibold tracking-tight">On Hold</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch w-full max-w-full">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 items-stretch w-full max-w-full">
           {rows.map((row, idx) => {
             const id = row["Chassis No"];
-            const bg = idx % 2 === 0 ? "bg-white" : "bg-gray-50";
             const commentValue = commentDraft[id] ?? (row.Comment ?? "");
             const pickupLocal  = pickupDraft[id]  ?? (row.EstimatedPickupAt ? new Date(row.EstimatedPickupAt).toISOString().slice(0,16) : "");
-
             return (
-              <div key={id} className={`h-full min-h-[280px] flex flex-col rounded-xl border p-4 shadow-sm ${bg}`}>
-                {/* 头部：标题 + 按钮 */}
+              <div key={id} className={`h-full min-h-[280px] flex flex-col rounded-xl border p-4 shadow-sm ${idx % 2 ? "bg-gray-50" : "bg-white"}`}>
                 <div className="flex items-center justify-between gap-3">
-                  <div className="font-semibold break-words break-all hyphens-auto">{id}</div>
+                  <div className="font-medium text-sm break-words break-all hyphens-auto">{id}</div>
                   <Button
                     size="sm"
                     className="bg-red-600 text-white"
@@ -529,7 +498,6 @@ const OnHoldBoard: React.FC<{
                   </Button>
                 </div>
 
-                {/* 信息区：占据可用空间，保证等高 */}
                 <div className="mt-2 text-sm space-y-1 flex-1 min-h-[120px]">
                   <div className={CELL}><span className="text-gray-500">Customer：</span>{row.Customer || "-"}</div>
                   <div className={CELL}><span className="text-gray-500">Model：</span>{row.Model || "-"}</div>
@@ -537,7 +505,6 @@ const OnHoldBoard: React.FC<{
                   <div className={CELL}><span className="text-gray-500">Matched PO：</span>{row["Matched PO No"] || "-"}</div>
                 </div>
 
-                {/* 编辑区：固定控件宽度，避免撑宽 */}
                 <div className="mt-3 space-y-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <Input
@@ -576,7 +543,7 @@ const OnHoldBoard: React.FC<{
   );
 };
 
-/* ====================== ReallocationTable（保持旧接口） ====================== */
+/* ====================== ReallocationTable（保持原接口） ====================== */
 interface ReallocationTableProps {
   data: ProcessedReallocationEntry[];
   searchTerm: string;
@@ -595,7 +562,7 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
     setSortConfig({ key, direction });
   };
 
-  const safeStringIncludes = (v: any, s: string) => v !== null && v !== undefined && String(v).toLowerCase().includes(s);
+  const safeStringIncludes = (v: any, s: string) => v != null && String(v).toLowerCase().includes(s);
 
   const filteredAndSortedData = useMemo(() => {
     const s = (searchTerm || "").toLowerCase();
@@ -663,7 +630,7 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((re) => (
+              {filteredAndSortedData.map((re) => (
                 <TableRow key={`${re.chassisNumber}-${re.entryId || re.submitTime || "row"}`}>
                   <TableCell className={CELL}>{re.chassisNumber}</TableCell>
                   <TableCell className={CELL}>{re.customer || "-"}</TableCell>

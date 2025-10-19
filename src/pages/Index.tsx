@@ -98,15 +98,17 @@ const Index = () => {
           <p className="text-gray-600">SAP Data / Reallocation Data / Schedule Data</p>
         </div>
 
-        <DispatchStats
-          total={stats.total}
-          invalidStock={stats.invalidStock}
-          snowyStock={stats.snowyStock}
-          canBeDispatched={stats.canBeDispatched}
-          onFilterChange={handleFilterChange}
-          activeFilter={activeFilter}
-          onRefresh={handleRefresh}
-        />
+       <DispatchStats
+         total={stats.total}
+         invalidStock={stats.invalidStock}
+         snowyStock={stats.snowyStock}
+         canBeDispatched={stats.canBeDispatched}
+         onHold={stats.onHold}            // ✅ 新增
+         activeFilter={filter}
+         onFilterChange={setFilter}
+         onRefresh={refresh}
+       />
+
 
         <DispatchTable
           data={filteredDispatchData}

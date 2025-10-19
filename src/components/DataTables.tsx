@@ -6,43 +6,46 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUpDown, AlertTriangle, Mail, RefreshCw } from "lucide-react";
 import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
-import { getGRDaysColor, getGRDaysWidth, reportError } from "@/lib/firebase";
-import { patchDispatch } from "@/lib/firebase";
+import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { sendReportEmail, EmailData } from "@/lib/emailjs";
 import { toast } from "sonner";
 
-/* ====================== 小工具：通用单元格样式，防横向溢出 ====================== */
+/* -------- 通用样式，防横向溢出 -------- */
 const CELL = "text-sm whitespace-pre-wrap break-words break-all hyphens-auto";
 
-/* ====================== DispatchStats（保持旧接口） ====================== */
+/* ====================== 顶部统计卡片（含 On Hold） ====================== */
 interface DispatchStatsProps {
   total: number;
   invalidStock: number;
   snowyStock: number;
   canBeDispatched: number;
+  onHold?: number;
   onFilterChange: (filter: string) => void;
   activeFilter: string;
   onRefresh: () => void;
 }
 
 export const DispatchStats: React.FC<DispatchStatsProps> = ({
-  total, invalidStock, snowyStock, canBeDispatched, onFilterChange, activeFilter, onRefresh
+  total, invalidStock, snowyStock, canBeDispatched, onHold,
+  onFilterChange, activeFilter, onRefresh
 }) => {
   const cards = [
-    { label: "Total Number", value: total, filter: "all", color: "text-blue-600" },
-    { label: "Invalid Stock", value: invalidStock, filter: "invalid", color: "text-red-600" },
+    { label: "Total", value: total, filter: "all", color: "text-blue-600" },
+    { label: "Invalid", value: invalidStock, filter: "invalid", color: "text-red-600" },
     { label: "Snowy Stock", value: snowyStock, filter: "snowy", color: "text-purple-600" },
-    { label: "Can be Dispatched", value: canBeDispatched, filter: "canBeDispatched", color: "text-emerald-600" }
+    { label: "Can Dispatch", value: canBeDispatched, filter: "canBeDispatched", color: "text-emerald-600" },
+    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold", color: "text-amber-600" }] : []),
   ];
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full max-w-full overflow-x-hidden">
       <div className="flex justify-end">
         <Button onClick={onRefresh} variant="outline" className="flex items-center gap-2">
           <RefreshCw className="h-4 w-4" />
           <span>Refresh</span>
         </Button>
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {cards.map((card) => (
           <Card
             key={card.filter}
@@ -53,7 +56,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
               <CardTitle className="text-xs font-medium text-gray-600 truncate">{card.label}</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className={`text-xl font-bold ${card.color}`}>{card.value}</div>
+              <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
             </CardContent>
           </Card>
         ))}
@@ -62,7 +65,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== DispatchTable（两行布局 + 实时/乐观更新 + 无横滚） ====================== */
+/* ====================== 主表（两行一组 + 美化 + 无横滚） ====================== */
 interface DispatchTableProps {
   data: ProcessedDispatchEntry[];
   searchTerm: string;
@@ -82,7 +85,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [pickupDraft, setPickupDraft]   = useState<Record<string, string>>({});
 
-  // 乐观更新（UI 即时反映）
+  // 乐观更新
   const [optimistic, setOptimistic]     = useState<Record<string, Partial<ProcessedDispatchEntry>>>({});
   const [saving, setSaving]             = useState<Record<string, boolean>>({});
   const [error, setError]               = useState<Record<string, string | undefined>>({});
@@ -91,7 +94,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     setOptimistic((m) => ({ ...m, [id]: { ...(m[id] || {}), ...patch } }));
   };
 
-  // 父数据同步时，自动清理已一致的乐观覆盖
+  // 父数据同步时，清理已一致的乐观覆盖
   useEffect(() => {
     if (!allData?.length) return;
     setOptimistic((cur) => {
@@ -126,7 +129,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     return Object.values(map);
   }, [allData, optimistic]);
 
-  // 过滤 + 排序
+  // 过滤 + 排序 + 搜索
   const filteredAndSortedData = useMemo(() => {
     const searchLower = (searchTerm || "").toLowerCase();
     const base = (data.length ? data : allData).map(e => ({ ...e, ...(optimistic[e["Chassis No"]] || {}) }));
@@ -185,7 +188,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   const maxGRDays = Math.max(...mergedAll.map(entry => entry["GR to GI Days"] || 0), 1);
 
-  // ===== 日期工具 =====
+  // 日期工具
   const isoToDatetimeLocal = (iso?: string | null) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -200,15 +203,15 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   };
   const minDT = useMemo(minDatetimeLocalNow, []);
 
-  // ===== 写库（乐观 + 回滚） =====
+  // 写库（乐观 + 回滚）
   const handleToggleOnHold = async (row: ProcessedDispatchEntry, next: boolean) => {
     const id = row["Chassis No"];
-    const optimisticPatch = { OnHold: next, OnHoldAt: new Date().toISOString(), OnHoldBy: "webapp" as const };
-    applyOptimistic(id, optimisticPatch);
+    const patch = { OnHold: next, OnHoldAt: new Date().toISOString(), OnHoldBy: "webapp" as const };
+    applyOptimistic(id, patch);
     setSaving((s) => ({ ...s, [id]: true }));
     setError((e) => ({ ...e, [id]: undefined }));
     try {
-      await patchDispatch(id, optimisticPatch);
+      await patchDispatch(id, patch);
     } catch (err: any) {
       setOptimistic((m) => {
         const prev = { ...(m[id] || {}) };
@@ -285,13 +288,13 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
       if (emailSent) {
         const errorDetails = `Dealer Check Mismatch - SAP Data: ${entry["SAP Data"] || "N/A"}, Scheduled Dealer: ${entry["Scheduled Dealer"] || "N/A"}, Reallocation To: ${entry.reallocatedTo || "N/A"}`;
         await reportError(chassisNo, errorDetails);
-        toast.success(`Report sent successfully for chassis ${chassisNo}! Email notification sent to dispatch team.`);
+        toast.success(`Report sent for ${chassisNo}.`);
       } else {
-        toast.error("Failed to send email report. Please check your connection and try again.");
+        toast.error("Failed to send email report.");
       }
     } catch (error) {
       console.error("Error sending report:", error);
-      toast.error("Failed to send report. Please try again.");
+      toast.error("Failed to send report.");
     } finally {
       setSendingEmail(null);
     }
@@ -325,7 +328,6 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardHeader>
 
         <CardContent className="p-0">
-          {/* 关键：禁止横向滚动 + 表格固定布局 + 内容强制换行 */}
           <div className="w-full max-w-full overflow-x-hidden">
             <Table className="w-full table-fixed">
               <TableHeader>
@@ -466,7 +468,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 卡片区：响应式等宽 + 统一高度 + 无横向滚动 */}
+      {/* On Hold 卡片区：响应式等宽 + 统一高度 + 无横滚 */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}
@@ -481,7 +483,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   );
 };
 
-/* ====================== On Hold 卡片（均匀栅格 & 统一尺寸） ====================== */
+/* ====================== On Hold 卡片（等高整齐） ====================== */
 const OnHoldBoard: React.FC<{
   rows: ProcessedDispatchEntry[];
   saving: Record<string, boolean>;
@@ -505,7 +507,6 @@ const OnHoldBoard: React.FC<{
         <CardTitle className="text-lg">On Hold</CardTitle>
       </CardHeader>
       <CardContent>
-        {/* 1/2/3/4 列自适应；items-stretch 保证卡片等高；gap 加大视觉呼吸 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch w-full max-w-full">
           {rows.map((row, idx) => {
             const id = row["Chassis No"];
@@ -514,7 +515,7 @@ const OnHoldBoard: React.FC<{
             const pickupLocal  = pickupDraft[id]  ?? (row.EstimatedPickupAt ? new Date(row.EstimatedPickupAt).toISOString().slice(0,16) : "");
 
             return (
-              <div key={id} className={`h-full flex flex-col rounded-xl border p-4 shadow-sm ${bg}`}>
+              <div key={id} className={`h-full min-h-[280px] flex flex-col rounded-xl border p-4 shadow-sm ${bg}`}>
                 {/* 头部：标题 + 按钮 */}
                 <div className="flex items-center justify-between gap-3">
                   <div className="font-semibold break-words break-all hyphens-auto">{id}</div>
@@ -528,7 +529,7 @@ const OnHoldBoard: React.FC<{
                   </Button>
                 </div>
 
-                {/* 信息区：占据可用空间，保证卡片等高时内容拉伸自然 */}
+                {/* 信息区：占据可用空间，保证等高 */}
                 <div className="mt-2 text-sm space-y-1 flex-1 min-h-[120px]">
                   <div className={CELL}><span className="text-gray-500">Customer：</span>{row.Customer || "-"}</div>
                   <div className={CELL}><span className="text-gray-500">Model：</span>{row.Model || "-"}</div>
@@ -575,7 +576,7 @@ const OnHoldBoard: React.FC<{
   );
 };
 
-/* ====================== ReallocationTable（保持旧接口，简化实现） ====================== */
+/* ====================== ReallocationTable（保持旧接口） ====================== */
 interface ReallocationTableProps {
   data: ProcessedReallocationEntry[];
   searchTerm: string;

@@ -1,133 +1,109 @@
-import React, { useState, useEffect } from 'react';
-import { DispatchStats, DispatchTable, ReallocationTable } from '@/components/DataTables';
-import { 
-  fetchDispatchData, 
-  fetchReallocationData, 
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  fetchDispatchData,
+  fetchReallocationData,
   fetchScheduleData,
   processDispatchData,
   processReallocationData,
   getDispatchStats,
-  filterDispatchData
-} from '@/lib/firebase';
-import { ProcessedDispatchEntry, ProcessedReallocationEntry } from '@/types';
-import { toast } from 'sonner';
+  filterDispatchData,
+} from "@/lib/firebase";
+import { DispatchData, ReallocationData, ScheduleData, ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
+import { DispatchStats, DispatchTable, ReallocationTable } from "@/components/DataTables";
 
-const Index = () => {
-  const [dispatchData, setDispatchData] = useState<ProcessedDispatchEntry[]>([]);
-  const [reallocationData, setReallocationData] = useState<ProcessedReallocationEntry[]>([]);
-  const [filteredDispatchData, setFilteredDispatchData] = useState<ProcessedDispatchEntry[]>([]);
-  const [dispatchSearchTerm, setDispatchSearchTerm] = useState('');
-  const [reallocationSearchTerm, setReallocationSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    total: 0,
-    okStatus: 0,
-    invalidStock: 0,
-    snowyStock: 0,
-    canBeDispatched: 0
-  });
+const IndexPage: React.FC = () => {
+  // ---------- 原始数据 ----------
+  const [dispatchRaw, setDispatchRaw] = useState<DispatchData>({});
+  const [reallocRaw, setReallocRaw] = useState<ReallocationData>({});
+  const [schedule, setSchedule] = useState<ScheduleData>([]);
 
-  const loadData = async () => {
+  // ---------- UI 状态 ----------
+  const [search, setSearch] = useState("");
+  // 关键：定义 filter，避免 “filter is not defined”
+  const [filter, setFilter] = useState<"all" | "invalid" | "snowy" | "canBeDispatched" | "onHold">("all");
+  const [loading, setLoading] = useState(false);
+
+  // ---------- 拉取数据 ----------
+  const loadAll = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const [rawDispatchData, rawReallocationData, scheduleData] = await Promise.all([
+      const [d, r, s] = await Promise.all([
         fetchDispatchData(),
         fetchReallocationData(),
-        fetchScheduleData()
+        fetchScheduleData(),
       ]);
-
-      const processedDispatch = processDispatchData(rawDispatchData, rawReallocationData);
-      const processedReallocation = processReallocationData(rawReallocationData, scheduleData);
-      
-      setDispatchData(processedDispatch);
-      setReallocationData(processedReallocation);
-      
-      const dispatchStats = getDispatchStats(rawDispatchData, rawReallocationData);
-      setStats(dispatchStats);
-      
-      // Apply initial filter
-      const filtered = filterDispatchData(processedDispatch, activeFilter, rawReallocationData);
-      setFilteredDispatchData(filtered);
-      
-      toast.success('Data loaded successfully');
-    } catch (error) {
-      console.error('Error loading data:', error);
-      toast.error('Failed to load data. Please try again.');
+      setDispatchRaw(d || {});
+      setReallocRaw(r || {});
+      setSchedule(s || []);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    loadAll();
   }, []);
 
-  const handleFilterChange = async (filter: string) => {
-    setActiveFilter(filter);
-    try {
-      const rawReallocationData = await fetchReallocationData();
-      const filtered = filterDispatchData(dispatchData, filter, rawReallocationData);
-      setFilteredDispatchData(filtered);
-    } catch (error) {
-      console.error('Error applying filter:', error);
-      toast.error('Failed to apply filter');
-    }
-  };
+  // ---------- 处理数据 ----------
+  const reallocProcessed: ProcessedReallocationEntry[] = useMemo(
+    () => processReallocationData(reallocRaw, schedule),
+    [reallocRaw, schedule]
+  );
 
-  const handleRefresh = () => {
-    loadData();
-  };
+  const dispatchProcessed: ProcessedDispatchEntry[] = useMemo(
+    () => processDispatchData(dispatchRaw, reallocRaw),
+    [dispatchRaw, reallocRaw]
+  );
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading dashboard data...</p>
-        </div>
-      </div>
-    );
-  }
+  // 顶部统计（含 onHold）
+  const stats = useMemo(
+    () => getDispatchStats(dispatchRaw, reallocRaw),
+    [dispatchRaw, reallocRaw]
+  );
+
+  // 根据顶部筛选卡片决定主表数据（注意：filterDispatchData 需要原始 reallocationData）
+  const visibleDispatch: ProcessedDispatchEntry[] = useMemo(
+    () => filterDispatchData(dispatchProcessed, filter, reallocRaw),
+    [dispatchProcessed, filter, reallocRaw]
+  );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Dispatch Dashboard</h1>
-          <p className="text-gray-600">SAP Data / Reallocation Data / Schedule Data</p>
-        </div>
+    <div className="p-4 md:p-6 w-full max-w-full overflow-x-hidden space-y-6">
+      {/* 顶部统计卡片（新增 onHold） */}
+      <DispatchStats
+        total={stats.total}
+        invalidStock={stats.invalidStock}
+        snowyStock={stats.snowyStock}
+        canBeDispatched={stats.canBeDispatched}
+        onHold={stats.onHold}                 // ✅ 显示 On Hold 数量
+        activeFilter={filter}
+        onFilterChange={setFilter}            // ✅ 点击卡片切换过滤
+        onRefresh={loadAll}
+      />
 
-       <DispatchStats
-         total={stats.total}
-         invalidStock={stats.invalidStock}
-         snowyStock={stats.snowyStock}
-         canBeDispatched={stats.canBeDispatched}
-         onHold={stats.onHold}            // ✅ 新增
-         activeFilter={filter}
-         onFilterChange={setFilter}
-         onRefresh={refresh}
-       />
+      {/* 发运主表（两行一组 + 白灰分隔；无横向滚动；支持 OnHold/Comment/Pickup 实时写库） */}
+      <DispatchTable
+        data={visibleDispatch}                // ✅ 已按 filter 过滤后的数据
+        allData={dispatchProcessed}           // 用于乐观层对齐
+        filter={filter}                       // ✅ 传入，避免未定义
+        searchTerm={search}
+        onSearchChange={setSearch}
+        reallocationData={reallocProcessed}   // 表格里做联动搜索展示
+      />
 
+      {/* 调拨表（如你首页需要保留） */}
+      <ReallocationTable
+        data={reallocProcessed}
+        searchTerm={search}
+        onSearchChange={setSearch}
+        dispatchData={dispatchProcessed}
+      />
 
-        <DispatchTable
-          data={filteredDispatchData}
-          searchTerm={dispatchSearchTerm}
-          onSearchChange={setDispatchSearchTerm}
-          filter={activeFilter}
-          allData={dispatchData}
-          reallocationData={reallocationData}
-        />
-
-        <ReallocationTable
-          data={reallocationData}
-          searchTerm={reallocationSearchTerm}
-          onSearchChange={setReallocationSearchTerm}
-          dispatchData={dispatchData}
-        />
-      </div>
+      {loading && (
+        <div className="text-sm text-gray-500">Loading...</div>
+      )}
     </div>
   );
 };
 
-export default Index;
+export default IndexPage;

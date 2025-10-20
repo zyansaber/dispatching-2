@@ -9,7 +9,7 @@ import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { toast } from "sonner";
 
-// 让 TS 安静（CDN 注入到 window.XLSX）
+// 让 TS 认识全局 XLSX（CDN 动态注入）
 declare global {
   interface Window { XLSX?: any }
 }
@@ -51,6 +51,7 @@ interface DispatchStatsProps {
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
   onRefresh: () => void;
 }
+
 export const DispatchStats: React.FC<DispatchStatsProps> = ({
   total, invalidStock, snowyStock, canBeDispatched, onHold,
   onFilterChange, activeFilter = "all"
@@ -375,7 +376,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* 主表 */}
       <Card className="w-full max-w-full">
-        {/* 吸顶 Header */}
+        {/* 吸顶标题 */}
         <CardHeader className="sticky top-0 z-20 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <CardTitle className="text-lg font-semibold tracking-tight">Dispatch Data</CardTitle>
@@ -404,9 +405,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                 ))}
               </colgroup>
 
-              <TableHeader>
+              {/* ✅ 吸顶表头：随滚动固定在“Dispatch Data”标题之下 */}
+              <TableHeader className="sticky top-[60px] z-10 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
                 <TableRow>
-                  {/* 左侧分组竖条列（空表头用于对齐） */}
                   <TableHead className="p-0" />
                   <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
                   <SortableHeader sortKey="GR to GI Days" align="center">GR Days</SortableHeader>
@@ -416,7 +417,6 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   <SortableHeader sortKey="Scheduled Dealer">Scheduled Dealer</SortableHeader>
                   <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
                   <SortableHeader sortKey="Code">Code</SortableHeader>
-                  {/* On Hold 表头齐顶 */}
                   <TableHead className="text-center align-top pt-2">On Hold</TableHead>
                 </TableRow>
               </TableHeader>
@@ -473,7 +473,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* 第二行：编辑 & 扩展信息（含 Checks、Reallocation(红)、Actions） */}
+                      {/* 第二行：编辑 & 扩展（Checks + Reallocation 红、Actions） */}
                       <TableRow className={`${zebra} ${groupShadow}`}>
                         {/* 第二行占据首行剩余 9 列（不含最左边色条列） */}
                         <TableCell colSpan={9}>
@@ -508,9 +508,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </Button>
                             </div>
 
-                            {/* Checks（与 Reallocation、Actions 并排） */}
+                            {/* Checks */}
                             <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-[13px] text-gray-500 w-40 shrink-0">Checks (Status + Dealer)</span>
+                              <span className="text-[13px] text-gray-500 w-44 shrink-0">Checks (Status + Dealer)</span>
                               <span
                                 className={`px-2 py-1 rounded-full text-xs ${
                                   entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'

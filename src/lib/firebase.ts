@@ -1,9 +1,15 @@
 // src/lib/firebase.ts
-// 仅包含 Firebase 初始化 + 数据访问/工具函数。不要放任何 React/JSX！
-
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, get, push, update } from "firebase/database";
-import type {
+import {
+  getDatabase,
+  ref,
+  get,
+  push,
+  update,
+  onValue,
+  off,
+} from "firebase/database";
+import {
   ReallocationData,
   DispatchData,
   ScheduleData,
@@ -11,8 +17,7 @@ import type {
   ProcessedDispatchEntry,
 } from "@/types";
 
-// —— 初始化 Firebase ——
-// （如果你的项目里已有初始化，这里保持一致；避免重复初始化）
+// -------------------- Firebase 初始化 --------------------
 const firebaseConfig = {
   apiKey: "AIzaSyBcczqGj5X1_w9aCX1lOK4-kgz49Oi03Bg",
   authDomain: "scheduling-dd672.firebaseapp.com",
@@ -25,20 +30,19 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const database = getDatabase(app);
+export const db = getDatabase(app);
 
-// —— 工具：转义 RTDB 的 key ——
-// （Firebase RTDB key 不允许 . # $ [ ] / 等字符）
-export function escapeKey(key: string) {
+// -------------------- 工具函数 --------------------
+function escapeKey(key: string) {
   return key.replace(/[.#$\[\]\/]/g, "_");
 }
 
-// —— Dispatch 节点的引用/局部更新 ——
-// 路径：/Dispatch/<Chassis No>
+// /Dispatch/<Chassis No> 的引用
 export function dispatchRef(chassisNo: string) {
-  return ref(database, `Dispatch/${escapeKey(chassisNo)}`);
+  return ref(db, `Dispatch/${escapeKey(chassisNo)}`);
 }
 
+// 按底盘号进行“局部更新”
 export async function patchDispatch(
   chassisNo: string,
   data: Record<string, any>
@@ -46,60 +50,8 @@ export async function patchDispatch(
   await update(dispatchRef(chassisNo), data);
 }
 
-// —— 通用读取 ——
-// 这些函数供页面加载数据源使用
-export const fetchReallocationData = async (): Promise<ReallocationData> => {
-  try {
-    const snapshot = await get(ref(database, "reallocation"));
-    return snapshot.val() || {};
-  } catch (error) {
-    console.error("Error fetching reallocation data:", error);
-    return {};
-  }
-};
-
-export const fetchDispatchData = async (): Promise<DispatchData> => {
-  try {
-    const snapshot = await get(ref(database, "Dispatch"));
-    return snapshot.val() || {};
-  } catch (error) {
-    console.error("Error fetching dispatch data:", error);
-    return {};
-  }
-};
-
-export const fetchScheduleData = async (): Promise<ScheduleData> => {
-  try {
-    const snapshot = await get(ref(database, "schedule"));
-    return snapshot.val() || [];
-  } catch (error) {
-    console.error("Error fetching schedule data:", error);
-    return [];
-  }
-};
-
-// —— 错误上报（写入 /dispatchError） ——
-export const reportError = async (
-  chassisNo: string,
-  errorDetails: string
-): Promise<boolean> => {
-  try {
-    const errorData = {
-      chassisNo,
-      errorDetails,
-      timestamp: new Date().toISOString(),
-      status: "reported",
-    };
-    await push(ref(database, "dispatchError"), errorData);
-    return true;
-  } catch (error) {
-    console.error("Error reporting error:", error);
-    return false;
-  }
-};
-
-// —— 日期工具（DD/MM/YYYY 解析） ——
-const parseDDMMYYYY = (dateString: string): Date => {
+// DD/MM/YYYY 解析
+const parseDDMMYYYY = (dateString: string | undefined): Date => {
   if (!dateString || typeof dateString !== "string") return new Date(0);
   const parts = dateString.trim().split("/");
   if (parts.length !== 3) return new Date(0);
@@ -115,35 +67,78 @@ const parseDDMMYYYY = (dateString: string): Date => {
     month < 0 ||
     month > 11 ||
     year < 1900
-  )
+  ) {
     return new Date(0);
+  }
   return new Date(year, month, day);
 };
 
-// —— 业务处理函数（留给原页面使用） ——
-
-// 校验 Dealer
-export const validateDealerCheck = (
-  sapData: string | undefined,
-  scheduledDealer: string | undefined,
-  reallocatedTo: string | undefined
-): string => {
-  if (
-    sapData &&
-    scheduledDealer &&
-    reallocatedTo &&
-    sapData === scheduledDealer &&
-    scheduledDealer === reallocatedTo
-  ) {
-    return "OK";
+// -------------------- 数据读取 --------------------
+export const fetchReallocationData = async (): Promise<ReallocationData> => {
+  try {
+    const snapshot = await get(ref(db, "reallocation"));
+    return snapshot.val() || {};
+  } catch (error) {
+    console.error("Error fetching reallocation data:", error);
+    return {};
   }
-  if (sapData && scheduledDealer && sapData === scheduledDealer && !reallocatedTo) {
-    return "OK";
-  }
-  return "Mismatch";
 };
 
-// 处理 Reallocation
+export const fetchDispatchData = async (): Promise<DispatchData> => {
+  try {
+    const snapshot = await get(ref(db, "Dispatch"));
+    return snapshot.val() || {};
+  } catch (error) {
+    console.error("Error fetching dispatch data:", error);
+    return {};
+  }
+};
+
+export const fetchScheduleData = async (): Promise<ScheduleData> => {
+  try {
+    const snapshot = await get(ref(db, "schedule"));
+    return snapshot.val() || [];
+  } catch (error) {
+    console.error("Error fetching schedule data:", error);
+    return [];
+  }
+};
+
+// -------------------- 实时订阅 --------------------
+export function subscribeDispatch(onChange: (data: DispatchData) => void) {
+  const r = ref(db, "Dispatch");
+  const cb = onValue(r, (snap) => onChange((snap.val() || {}) as DispatchData));
+  return () => off(r, "value", cb);
+}
+
+export function subscribeReallocation(onChange: (data: ReallocationData) => void) {
+  const r = ref(db, "reallocation");
+  const cb = onValue(r, (snap) =>
+    onChange((snap.val() || {}) as ReallocationData)
+  );
+  return () => off(r, "value", cb);
+}
+
+// -------------------- 业务辅助 --------------------
+export const reportError = async (
+  chassisNo: string,
+  errorDetails: string
+): Promise<boolean> => {
+  try {
+    const errorData = {
+      chassisNo,
+      errorDetails,
+      timestamp: new Date().toISOString(),
+      status: "reported",
+    };
+    await push(ref(db, "dispatchError"), errorData);
+    return true;
+  } catch (error) {
+    console.error("Error reporting error:", error);
+    return false;
+  }
+};
+
 export const processReallocationData = (
   reallocationData: ReallocationData,
   scheduleData: ScheduleData
@@ -157,20 +152,17 @@ export const processReallocationData = (
 
   Object.entries(reallocationData).forEach(([chassisNumber, entries]) => {
     const entryIds = Object.keys(entries);
-    if (entryIds.length === 0) return;
+    if (!entryIds.length) return;
 
     const latestEntryId = entryIds.reduce((latest, current) => {
-      const latestDate = parseDDMMYYYY(
-        entries[latest].date || entries[latest].submitTime
-      );
-      const currentDate = parseDDMMYYYY(
-        entries[current].date || entries[current].submitTime
-      );
+      const latestDate = parseDDMMYYYY(entries[latest].date || entries[latest].submitTime);
+      const currentDate = parseDDMMYYYY(entries[current].date || entries[current].submitTime);
       return currentDate > latestDate ? current : latest;
     });
 
     const latestEntry = entries[latestEntryId];
     const regentProduction = chassisToRegentProduction.get(chassisNumber);
+
     if (regentProduction === "Finished") return;
 
     processed.push({
@@ -184,7 +176,26 @@ export const processReallocationData = (
   return processed;
 };
 
-// 处理 Dispatch
+export const validateDealerCheck = (
+  sapData: string | undefined,
+  scheduledDealer: string | undefined,
+  reallocatedTo: string | undefined
+): string => {
+  if (
+    sapData &&
+    scheduledDealer &&
+    reallocatedTo &&
+    sapData === scheduledDealer &&
+    scheduledDealer === reallocatedTo
+  )
+    return "OK";
+
+  if (sapData && scheduledDealer && sapData === scheduledDealer && !reallocatedTo)
+    return "OK";
+
+  return "Mismatch";
+};
+
 export const processDispatchData = (
   dispatchData: DispatchData,
   reallocationData: ReallocationData
@@ -194,21 +205,18 @@ export const processDispatchData = (
   const chassisToReallocatedTo = new Map<string, string>();
   Object.entries(reallocationData).forEach(([chassisNumber, entries]) => {
     const entryIds = Object.keys(entries);
-    if (entryIds.length > 0) {
-      const latestEntryId = entryIds.reduce((latest, current) => {
-        const latestDate = parseDDMMYYYY(
-          entries[latest].date || entries[latest].submitTime
-        );
-        const currentDate = parseDDMMYYYY(
-          entries[current].date || entries[current].submitTime
-        );
-        return currentDate > latestDate ? current : latest;
-      });
-      chassisToReallocatedTo.set(
-        chassisNumber,
-        entries[latestEntryId].reallocatedTo
-      );
-    }
+    if (!entryIds.length) return;
+
+    const latestEntryId = entryIds.reduce((latest, current) => {
+      const latestDate = parseDDMMYYYY(entries[latest].date || entries[latest].submitTime);
+      const currentDate = parseDDMMYYYY(entries[current].date || entries[current].submitTime);
+      return currentDate > latestDate ? current : latest;
+    });
+
+    chassisToReallocatedTo.set(
+      chassisNumber,
+      entries[latestEntryId].reallocatedTo || ""
+    );
   });
 
   Object.entries(dispatchData).forEach(([chassisNo, entry]) => {
@@ -218,18 +226,17 @@ export const processDispatchData = (
       entry["Scheduled Dealer"],
       reallocatedTo
     );
-
     processed.push({
+      "Chassis No": entry["Chassis No"] || chassisNo, // 注入主键，防止库里没存该字段时报错
       ...entry,
       DealerCheck: validatedDealerCheck,
-      ...(reallocatedTo && { reallocatedTo }),
+      ...(reallocatedTo ? { reallocatedTo } : {}),
     });
   });
 
   return processed;
 };
 
-// Snowy Stock 判断
 const isSnowyStock = (
   entry: ProcessedDispatchEntry,
   chassisToReallocatedTo: Map<string, string>
@@ -244,7 +251,6 @@ const isSnowyStock = (
   );
 };
 
-// 顶部统计
 export const getDispatchStats = (
   dispatchData: DispatchData,
   reallocationData: ReallocationData
@@ -253,89 +259,100 @@ export const getDispatchStats = (
   const total = entries.length;
   const okStatus = entries.filter((e) => e.Statuscheck === "OK").length;
   const invalidStock = entries.filter((e) => e.Statuscheck !== "OK").length;
+  const onHold = entries.filter((e) => e.OnHold === true).length;
 
   const chassisToReallocatedTo = new Map<string, string>();
   Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
-    const ids = Object.keys(entryObj);
-    if (ids.length > 0) {
-      const latestId = ids.reduce((latest, current) => {
-        const latestDate = parseDDMMYYYY(
-          entryObj[latest].date || entryObj[latest].submitTime
-        );
-        const currentDate = parseDDMMYYYY(
-          entryObj[current].date || entryObj[current].submitTime
-        );
-        return currentDate > latestDate ? current : latest;
-      });
-      chassisToReallocatedTo.set(chassisNumber, entryObj[latestId].reallocatedTo);
-    }
+    const entryIds = Object.keys(entryObj);
+    if (!entryIds.length) return;
+    const latestEntryId = entryIds.reduce((latest, current) => {
+      const latestDate = parseDDMMYYYY(entryObj[latest].date || entryObj[latest].submitTime);
+      const currentDate = parseDDMMYYYY(entryObj[current].date || entryObj[current].submitTime);
+      return currentDate > latestDate ? current : latest;
+    });
+    chassisToReallocatedTo.set(
+      chassisNumber,
+      entryObj[latestEntryId].reallocatedTo || ""
+    );
   });
 
-  const processedEntries = entries.map((e) => {
-    const reallocatedTo = chassisToReallocatedTo.get(e["Chassis No"]);
+  const processedEntries = entries.map((entry) => {
+    const reallocatedTo = chassisToReallocatedTo.get(entry["Chassis No"]);
     const validatedDealerCheck = validateDealerCheck(
-      e["SAP Data"],
-      e["Scheduled Dealer"],
+      entry["SAP Data"],
+      entry["Scheduled Dealer"],
       reallocatedTo
     );
-    return { ...e, DealerCheck: validatedDealerCheck, reallocatedTo };
+    return { ...entry, DealerCheck: validatedDealerCheck, reallocatedTo };
   });
 
   const snowyStock = processedEntries.filter((e) =>
     isSnowyStock(e, chassisToReallocatedTo)
   ).length;
-
   const canBeDispatched = processedEntries.filter(
     (e) => e.Statuscheck === "OK" && !isSnowyStock(e, chassisToReallocatedTo)
   ).length;
 
-  return { total, okStatus, invalidStock, snowyStock, canBeDispatched };
+  return {
+    total,
+    okStatus,
+    invalidStock,
+    snowyStock,
+    canBeDispatched,
+    onHold,
+  };
 };
 
-// 过滤
 export const filterDispatchData = (
   data: ProcessedDispatchEntry[],
   filter: string,
   reallocationData: ReallocationData
 ): ProcessedDispatchEntry[] => {
   if (filter === "all") return data;
-  if (filter === "ok") return data.filter((e) => e.Statuscheck === "OK");
   if (filter === "invalid") return data.filter((e) => e.Statuscheck !== "OK");
+  if (filter === "onHold") return data.filter((e) => e.OnHold === true);
 
   const chassisToReallocatedTo = new Map<string, string>();
   Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
-    const ids = Object.keys(entryObj);
-    if (ids.length > 0) {
-      const latestId = ids.reduce((latest, current) => {
-        const latestDate = parseDDMMYYYY(
-          entryObj[latest].date || entryObj[latest].submitTime
-        );
-        const currentDate = parseDDMMYYYY(
-          entryObj[current].date || entryObj[current].submitTime
-        );
-        return currentDate > latestDate ? current : latest;
-      });
-      chassisToReallocatedTo.set(chassisNumber, entryObj[latestId].reallocatedTo);
-    }
+    const entryIds = Object.keys(entryObj);
+    if (!entryIds.length) return;
+    const latestEntryId = entryIds.reduce((latest, current) => {
+      const latestDate = parseDDMMYYYY(entryObj[latest].date || entryObj[latest].submitTime);
+      const currentDate = parseDDMMYYYY(entryObj[current].date || entryObj[current].submitTime);
+      return currentDate > latestDate ? current : latest;
+    });
+    chassisToReallocatedTo.set(
+      chassisNumber,
+      entryObj[latestEntryId].reallocatedTo || ""
+    );
   });
 
-  if (filter === "snowy")
-    return data.filter((e) => isSnowyStock(e, chassisToReallocatedTo));
-
-  if (filter === "canBeDispatched")
+  if (filter === "snowy") {
     return data.filter(
-      (e) => e.Statuscheck === "OK" && !isSnowyStock(e, chassisToReallocatedTo)
+      (e) =>
+        e.reallocatedTo === "Snowy Stock" ||
+        e["Scheduled Dealer"] === "Snowy Stock"
     );
-
+  }
+  if (filter === "canBeDispatched") {
+    return data.filter(
+      (e) =>
+        e.Statuscheck === "OK" &&
+        !(e.reallocatedTo === "Snowy Stock" ||
+          e["Scheduled Dealer"] === "Snowy Stock")
+    );
+  }
   return data;
 };
 
-// GR 天数条的样式工具（给 UI 用）
+// -------------------- UI 色条辅助 --------------------
 export const getGRDaysColor = (days: number): string => {
   if (days <= 7) return "bg-green-500";
   if (days <= 14) return "bg-yellow-500";
   if (days <= 30) return "bg-orange-500";
   return "bg-red-500";
 };
-export const getGRDaysWidth = (days: number, maxDays: number): number =>
-  Math.min((days / Math.max(maxDays, 1)) * 100, 100);
+
+export const getGRDaysWidth = (days: number, maxDays: number): number => {
+  return Math.min((days / Math.max(maxDays, 1)) * 100, 100);
+};

@@ -4,19 +4,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowUpDown, AlertTriangle, Mail } from "lucide-react";
+import { ArrowUpDown, AlertTriangle, Mail, Download } from "lucide-react";
 import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { toast } from "sonner";
-
-// 可选：无邮件模块也不报错
-let sendReportEmail: (data: any) => Promise<boolean>;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  sendReportEmail = require("@/lib/emailjs").sendReportEmail;
-} catch {
-  sendReportEmail = async () => false;
-}
 
 /** 单元格：一行显示 + 溢出省略号（不再换行） */
 const CELL = "text-sm leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
@@ -34,6 +25,15 @@ const COLS = [
   { key: "Code",             w: 120 },
   { key: "On Hold",          w: 110 },
 ];
+
+// 可选：无邮件模块也不报错
+let sendReportEmail: (data: any) => Promise<boolean>;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  sendReportEmail = require("@/lib/emailjs").sendReportEmail;
+} catch {
+  sendReportEmail = async () => false;
+}
 
 /* ====================== 顶部统计卡片 ====================== */
 interface DispatchStatsProps {
@@ -286,6 +286,68 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     }
   };
 
+  // ===== Excel 导出（优先用 xlsx，失败回落 CSV） =====
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const toPlainRow = (e: ProcessedDispatchEntry) => ({
+    "Chassis No": e["Chassis No"],
+    "GR to GI Days": e["GR to GI Days"] ?? "",
+    Customer: e.Customer ?? "",
+    Model: e.Model ?? "",
+    "SAP Data": e["SAP Data"] ?? "",
+    "Scheduled Dealer": e["Scheduled Dealer"] ?? "",
+    "Matched PO No": e["Matched PO No"] ?? "",
+    Code: e.Code ?? "",
+    "On Hold": e.OnHold ? "Yes" : "No",
+    Status: e.Statuscheck ?? "",
+    Dealer: e.DealerCheck ?? "",
+    Reallocation: e.reallocatedTo ?? "",
+    Comment: e.Comment ?? "",
+    "Estimated Pickup At": e.EstimatedPickupAt ?? "",
+  });
+
+  const exportExcel = async () => {
+    try {
+      const XLSX = await import("xlsx"); // 需要在项目依赖里安装：pnpm add xlsx
+      const active = activeRows.map(toPlainRow);
+      const onhold = onHoldRows.map(toPlainRow);
+
+      const wb = XLSX.utils.book_new();
+      const ws1 = XLSX.utils.json_to_sheet(active);
+      const ws2 = XLSX.utils.json_to_sheet(onhold);
+      XLSX.utils.book_append_sheet(wb, ws1, "Active");
+      XLSX.utils.book_append_sheet(wb, ws2, "On Hold");
+
+      const wbout = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      downloadBlob(new Blob([wbout], { type: "application/octet-stream" }), `dispatch_${new Date().toISOString().slice(0,10)}.xlsx`);
+      toast.success("Excel 导出完成");
+    } catch (err) {
+      // 回落：导出 CSV（两个文件）
+      const rowsToCsv = (rows: any[]) => {
+        if (!rows.length) return "";
+        const headers = Object.keys(rows[0]);
+        const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+        const lines = [headers.map(escape).join(",")];
+        for (const r of rows) lines.push(headers.map(h => escape(r[h])).join(","));
+        return lines.join("\n");
+      };
+      const active = activeRows.map(toPlainRow);
+      const onhold = onHoldRows.map(toPlainRow);
+      downloadBlob(new Blob([rowsToCsv(active)], { type: "text/csv;charset=utf-8" }), `dispatch_active_${new Date().toISOString().slice(0,10)}.csv`);
+      downloadBlob(new Blob([rowsToCsv(onhold)], { type: "text/csv;charset=utf-8" }), `dispatch_onhold_${new Date().toISOString().slice(0,10)}.csv`);
+      toast.message("未安装 xlsx，已回落为 CSV 导出");
+    }
+  };
+
   const SortableHeader = ({ children, sortKey, className = "", align = "left" as "left" | "center" }: { children: React.ReactNode; sortKey: string; className?: string; align?: "left" | "center" }) => (
     <TableHead className={`cursor-pointer hover:bg-gray-50 align-top ${align === "center" ? "text-center" : ""} ${className}`} onClick={() => handleSort(sortKey)}>
       <div className={`flex ${align === "center" ? "justify-center" : ""} items-center gap-1`}>
@@ -299,15 +361,22 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* 主表 */}
       <Card className="w-full max-w-full">
-        <CardHeader>
+        {/* 吸顶 Header */}
+        <CardHeader className="sticky top-0 z-20 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <CardTitle className="text-lg font-semibold tracking-tight">Dispatch Data</CardTitle>
-            <Input
-              placeholder="Search chassis / dealer / PO / comment ..."
-              value={searchTerm}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full md:max-w-sm"
-            />
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <Input
+                placeholder="Search chassis / dealer / PO / comment ..."
+                value={searchTerm}
+                onChange={(e) => onSearchChange(e.target.value)}
+                className="w-full md:max-w-sm"
+              />
+              <Button variant="outline" className="shrink-0" onClick={exportExcel}>
+                <Download className="h-4 w-4 mr-1" />
+                Export
+              </Button>
+            </div>
           </div>
         </CardHeader>
 
@@ -333,7 +402,8 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   <SortableHeader sortKey="Scheduled Dealer">Scheduled Dealer</SortableHeader>
                   <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
                   <SortableHeader sortKey="Code">Code</SortableHeader>
-                  <TableHead className="text-center">On Hold</TableHead>
+                  {/* On Hold 表头齐顶 */}
+                  <TableHead className="text-center align-top pt-2">On Hold</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -390,7 +460,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* 第二行：编辑 & 扩展信息（含 Reallocation、Status/Dealer、Actions） */}
+                      {/* 第二行：编辑 & 扩展信息（含 Reallocation、Checks、Actions） */}
                       <TableRow className={`${zebra} ${groupShadow}`}>
                         {/* 第二行占据首行剩余 9 列（不含最左边色条列） */}
                         <TableCell colSpan={9}>
@@ -433,14 +503,24 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </div>
                             </div>
 
-                            {/* Status & Dealer（紧挨 Actions） */}
+                            {/* Checks（紧挨 Actions） */}
                             <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-[13px] text-gray-500 w-20 shrink-0">Checks</span>
-                              <span className={`px-2 py-1 rounded-full text-xs ${entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`} title={`Status: ${entry.Statuscheck || "-"}`}>
-                                {entry.Statuscheck || "-"}
+                              <span className="text-[13px] text-gray-500 w-40 shrink-0">Checks (Status + Dealer)</span>
+                              <span
+                                className={`px-2 py-1 rounded-full text-xs ${
+                                  entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                }`}
+                                title={`Status: ${entry.Statuscheck || "-"}`}
+                              >
+                                Status: {entry.Statuscheck || "-"}
                               </span>
-                              <span className={`px-2 py-1 rounded-full text-xs ${entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`} title={`Dealer: ${entry.DealerCheck || "-"}`}>
-                                {entry.DealerCheck || "-"}
+                              <span
+                                className={`px-2 py-1 rounded-full text-xs ${
+                                  entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                }`}
+                                title={`Dealer: ${entry.DealerCheck || "-"}`}
+                              >
+                                Dealer: {entry.DealerCheck || "-"}
                               </span>
                             </div>
 
@@ -477,8 +557,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                       <TableRow>
                         <TableCell colSpan={10} className="p-0">
                           <div className="h-6" />
-                          {/* 或者用线：
-                          <div className="h-[2px] bg-gray-200" /> */}
+                          {/* 或粗线：<div className="h-[2px] bg-gray-200" /> */}
                         </TableCell>
                       </TableRow>
                     </React.Fragment>
@@ -490,7 +569,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 看板（保持不变） */}
+      {/* On Hold 看板 */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}

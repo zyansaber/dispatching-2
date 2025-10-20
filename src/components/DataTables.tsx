@@ -9,7 +9,7 @@ import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { toast } from "sonner";
 
-// 若没有邮件模块，不报错
+// 可选：无邮件模块也不报错
 let sendReportEmail: (data: any) => Promise<boolean>;
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -21,22 +21,20 @@ try {
 /** 单元格：一行显示 + 溢出省略号（不再换行） */
 const CELL = "text-sm leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
 
-/** 列宽通过 <colgroup> 精准控制，避免左右滚动的同时保持整齐 */
+/** 列宽：减少首行列数，避免横向滚动 */
 const COLS = [
-  { key: "__bar",        w: 8  },  // 分组竖条列
-  { key: "Chassis No",   w: 140 },
-  { key: "GR to GI Days",w: 90  },
-  { key: "Customer",     w: 140 },
-  { key: "Model",        w: 120 },
-  { key: "SAP Data",     w: 160 },
-  { key: "Scheduled Dealer", w: 160 },
-  { key: "Matched PO No",w: 150 },
-  { key: "Code",         w: 110 },
-  { key: "On Hold",      w: 110 },
-  { key: "Statuscheck",  w: 110 },
-  { key: "DealerCheck",  w: 110 },
-  { key: "reallocatedTo",w: 150 },
-  { key: "Actions",      w: 110 },
+  { key: "__bar",            w: 8   }, // 左侧分组竖条
+  { key: "Chassis No",       w: 150 },
+  { key: "GR to GI Days",    w: 90  },
+  { key: "Customer",         w: 150 },
+  { key: "Model",            w: 120 },
+  { key: "SAP Data",         w: 170 },
+  { key: "Scheduled Dealer", w: 170 },
+  { key: "Matched PO No",    w: 160 },
+  { key: "Code",             w: 120 },
+  { key: "On Hold",          w: 110 },
+  { key: "Statuscheck",      w: 110 },
+  { key: "DealerCheck",      w: 110 },
 ];
 
 /* ====================== 顶部统计卡片 ====================== */
@@ -85,9 +83,9 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== 主表：两行一组 + 左侧色条 + 一行省略 ====================== */
+/* ====================== 主表：两行一组 + 左侧色条 + 组间粗分隔 ====================== */
 interface DispatchTableProps {
-  allData: ProcessedDispatchEntry[];                          // 总是全量
+  allData: ProcessedDispatchEntry[];
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
   searchTerm: string;
   onSearchChange: (term: string) => void;
@@ -109,7 +107,6 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   const [saving, setSaving]             = useState<Record<string, boolean>>({});
   const [error, setError]               = useState<Record<string, string | undefined>>({});
 
-  // 外部数据变化时，清理已落盘的乐观覆盖
   useEffect(() => {
     if (!allData?.length) return;
     setOptimistic((cur) => {
@@ -136,7 +133,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   const safeIncludes = (v: any, s: string) => v != null && String(v).toLowerCase().includes(s);
 
-  // —— 统一从全量 + 乐观层做筛选/排序，确保点击 OnHold 立即分流 —— //
+  // —— 统一从全量 + 乐观层做筛选/排序 —— //
   const baseMerged = useMemo(() => {
     const map: Record<string, ProcessedDispatchEntry> = {};
     for (const e of allData) map[e["Chassis No"]] = { ...e, ...(optimistic[e["Chassis No"]] || {}) };
@@ -338,12 +335,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   <SortableHeader sortKey="Scheduled Dealer">Scheduled Dealer</SortableHeader>
                   <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
                   <SortableHeader sortKey="Code">Code</SortableHeader>
-                  {/* ✅ On Hold 表头与其它列头齐平 */}
                   <TableHead className="text-center">On Hold</TableHead>
                   <SortableHeader sortKey="Statuscheck" align="center">Status</SortableHeader>
                   <SortableHeader sortKey="DealerCheck" align="center">Dealer</SortableHeader>
-                  <SortableHeader sortKey="reallocatedTo">Reallocation</SortableHeader>
-                  <TableHead className="text-center">Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -361,7 +355,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
                   return (
                     <React.Fragment key={id}>
-                      {/* 第一行 */}
+                      {/* 第一行：关键信息 */}
                       <TableRow className={`align-top ${zebra} ${groupShadow}`}>
                         {/* 左侧分组色条，rowSpan=2 */}
                         <TableCell rowSpan={2} className="p-0">
@@ -409,32 +403,20 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                             {entry.DealerCheck || "-"}
                           </span>
                         </TableCell>
-                        <TableCell className={`${CELL} font-medium text-blue-600`} title={entry.reallocatedTo || ""}>
-                          {entry.reallocatedTo || "-"}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleReportError(id)}
-                            disabled={isLoading}
-                            className="inline-flex items-center gap-1 text-xs"
-                          >
-                            {isLoading ? (<><Mail className="h-3 w-3 animate-pulse" /><span className="hidden sm:inline">Sending...</span></>) : (<><AlertTriangle className="h-3 w-3" /><span className="hidden sm:inline">Report</span></>)}
-                          </Button>
-                        </TableCell>
                       </TableRow>
 
-                      {/* 第二行：编辑区（共享左侧色条） */}
+                      {/* 第二行：编辑 & 扩展信息（含 Reallocation 和 Actions） */}
                       <TableRow className={`${zebra} ${groupShadow}`}>
-                        <TableCell colSpan={13}>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 py-3">
+                        {/* 第二行占据首行剩余 12 列 */}
+                        <TableCell colSpan={12}>
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 py-3">
+                            {/* Comment */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-500 w-28 shrink-0">Comment</span>
+                              <span className="text-[13px] text-gray-500 w-32 shrink-0">Comment</span>
                               <Input
                                 className="w-full max-w-[320px]"
                                 placeholder="Add a comment"
-                                value={commentDraft[id] ?? (entry.Comment ?? "")}
+                                value={commentValue}
                                 onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
                                 onKeyDown={(e) => { if (e.key === "Enter") handleSaveComment(entry); }}
                               />
@@ -443,8 +425,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </Button>
                             </div>
 
+                            {/* Estimated pickup */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-500 w-28 shrink-0">Estimated pickup</span>
+                              <span className="text-[13px] text-gray-500 w-32 shrink-0">Estimated pickup</span>
                               <input
                                 type="datetime-local"
                                 className="px-2 py-1 border rounded w-full max-w-[260px]"
@@ -456,8 +439,50 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                                 Save
                               </Button>
                             </div>
+
+                            {/* ✅ Reallocation（移到第二行） */}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-[13px] text-gray-500 w-32 shrink-0">Reallocation</span>
+                              <div className={`${CELL} w-full`} title={entry.reallocatedTo || ""}>
+                                {entry.reallocatedTo || "-"}
+                              </div>
+                            </div>
+
+                            {/* ✅ Actions（移到第二行） */}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-[13px] text-gray-500 w-32 shrink-0">Actions</span>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleReportError(id)}
+                                  disabled={sendingEmail === id}
+                                  className="inline-flex items-center gap-1 text-xs"
+                                >
+                                  {sendingEmail === id ? (
+                                    <>
+                                      <Mail className="h-3 w-3 animate-pulse" />
+                                      <span className="hidden sm:inline">Sending...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <AlertTriangle className="h-3 w-3" />
+                                      <span className="hidden sm:inline">Report</span>
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
                           </div>
+
                           {error[id] && <div className="text-xs text-red-600 mt-1">{error[id]}</div>}
+                        </TableCell>
+                      </TableRow>
+
+                      {/* ✅ 组间粗分隔空白（不产生横向滚动） */}
+                      <TableRow>
+                        <TableCell colSpan={13} className="p-0">
+                          <div className="h-6" /> {/* 6px 高度的空白区，你也可以换成 <div className='h-[2px] bg-gray-200'/> 粗线 */}
                         </TableCell>
                       </TableRow>
                     </React.Fragment>
@@ -469,7 +494,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 看板（原样保留） */}
+      {/* On Hold 看板（保持不变） */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}

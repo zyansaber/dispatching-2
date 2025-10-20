@@ -9,11 +9,11 @@ import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { toast } from "sonner";
 
-// ============ 关键：统一吸顶偏移（单位 px）================
-// 如果你的页面最顶部还有全局导航栏（例：56px），把它加进来：比如 56 + 48 = 104
-const STICKY_TOP_OFFSET = 0;    // 页面最顶部的全局导航高度（没有就 0）
-const TITLE_BAR_HEIGHT  = 56;   // 我们自带的工具栏高度
-const TABLE_HEADER_TOP  = STICKY_TOP_OFFSET + TITLE_BAR_HEIGHT;
+// ============ 统一吸顶偏移 ============
+// 如果页面最顶部有全局导航（例如 56px），把 STICKY_TOP_OFFSET 设为 56
+const STICKY_TOP_OFFSET = 0;   // 顶部全局导航高度（没有就 0）
+const TITLE_BAR_HEIGHT  = 56;  // 本组件工具栏高度（保持和样式一致）
+const HEADER_BAR_TOP    = STICKY_TOP_OFFSET + TITLE_BAR_HEIGHT;
 
 // 让 TS 认识全局 XLSX（CDN 动态注入）
 declare global {
@@ -46,7 +46,7 @@ try {
   sendReportEmail = async () => false;
 }
 
-/* ====================== 顶部统计卡片（保持不变） ====================== */
+/* ====================== 顶部统计卡片 ====================== */
 interface DispatchStatsProps {
   total: number;
   invalidStock: number;
@@ -57,7 +57,6 @@ interface DispatchStatsProps {
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
   onRefresh: () => void;
 }
-
 export const DispatchStats: React.FC<DispatchStatsProps> = ({
   total, invalidStock, snowyStock, canBeDispatched, onHold,
   onFilterChange, activeFilter = "all"
@@ -92,7 +91,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== 主表 ====================== */
+/* ====================== 主表：两行一组 + 左侧色条 + 组间分隔 ====================== */
 interface DispatchTableProps {
   allData: ProcessedDispatchEntry[];
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
@@ -113,6 +112,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   // 乐观更新
   const [optimistic, setOptimistic]     = useState<Record<string, Partial<ProcessedDispatchEntry>>>({});
+  thead
   const [saving, setSaving]             = useState<Record<string, boolean>>({});
   const [error, setError]               = useState<Record<string, string | undefined>>({});
 
@@ -402,40 +402,59 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </div>
       </div>
 
-      {/* 主表（去掉原来的 CardHeader sticky，避免双 sticky 叠加错位） */}
+      {/* 主表（CardHeader 改为普通，不再 sticky，避免与工具栏冲突） */}
       <Card className="w-full max-w-full">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm text-gray-600">Summary</CardTitle>
         </CardHeader>
 
         <CardContent className="p-0">
+          {/* ✅ 列名吸顶条（用 Grid，避免 thead sticky 重叠） */}
+          <div
+            className="sticky z-30 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b px-3"
+            style={{ top: HEADER_BAR_TOP }}
+          >
+            <div
+              className="grid items-center"
+              style={{
+                gridTemplateColumns: `
+                  8px
+                  150px
+                  90px
+                  150px
+                  120px
+                  170px
+                  170px
+                  160px
+                  120px
+                  110px
+                `
+              }}
+            >
+              <div /> {/* 左侧色条占位 */}
+              <div className="py-2 text-xs font-medium text-gray-600">Chassis</div>
+              <div className="py-2 text-xs font-medium text-gray-600 text-center">GR Days</div>
+              <div className="py-2 text-xs font-medium text-gray-600">Customer</div>
+              <div className="py-2 text-xs font-medium text-gray-600">Model</div>
+              <div className="py-2 text-xs font-medium text-gray-600">SAP Data</div>
+              <div className="py-2 text-xs font-medium text-gray-600">Scheduled Dealer</div>
+              <div className="py-2 text-xs font-medium text-gray-600">Matched PO No</div>
+              <div className="py-2 text-xs font-medium text-gray-600">Code</div>
+              <div className="py-2 text-xs font-medium text-gray-600 text-center">On Hold</div>
+            </div>
+          </div>
+
+          {/* 表格本体 */}
           <div className="w-full max-w-full overflow-x-hidden">
             <Table className="w-full table-fixed">
-              {/* 定宽列 */}
+              {/* 定宽列，保证行内不换行 + 水平齐整 */}
               <colgroup>
                 {COLS.map((c) => (
                   <col key={c.key} style={{ width: c.w === 8 ? "8px" : `${c.w}px` }} />
                 ))}
               </colgroup>
 
-              {/* ✅ 吸顶表头：固定在工具栏正下方 */}
-              <TableHeader
-                className="z-30 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b"
-                style={{ position: "sticky", top: TABLE_HEADER_TOP }}
-              >
-                <TableRow>
-                  <TableHead className="p-0" />
-                  <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
-                  <SortableHeader sortKey="GR to GI Days" align="center">GR Days</SortableHeader>
-                  <SortableHeader sortKey="Customer">Customer</SortableHeader>
-                  <SortableHeader sortKey="Model">Model</SortableHeader>
-                  <SortableHeader sortKey="SAP Data">SAP Data</SortableHeader>
-                  <SortableHeader sortKey="Scheduled Dealer">Scheduled Dealer</SortableHeader>
-                  <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
-                  <SortableHeader sortKey="Code">Code</SortableHeader>
-                  <TableHead className="text-center align-top pt-2">On Hold</TableHead>
-                </TableRow>
-              </TableHeader>
+              {/* ⚠️ 不再使用 <TableHeader sticky>，避免与吸顶条冲突 */}
 
               <TableBody>
                 {activeRows.map((entry, idx) => {
@@ -600,7 +619,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 卡片区（保持） */}
+      {/* On Hold 卡片区 */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}
@@ -703,7 +722,7 @@ const OnHoldBoard: React.FC<{
   );
 };
 
-/* ====================== ReallocationTable ====================== */
+/* ====================== ReallocationTable（保持原接口） ====================== */
 interface ReallocationTableProps {
   data: ProcessedReallocationEntry[];
   searchTerm: string;
@@ -791,7 +810,7 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
             </TableHeader>
             <TableBody>
               {filteredAndSortedData.map((re) => (
-                <TableRow key={`${re.chassisNumber}-${re.entryId || re.submitTime || "row"}`}>
+                <TableRow key={`${re.chassisNumber}-${(re as any).entryId || re.submitTime || "row"}`}>
                   <TableCell className={CELL} title={re.chassisNumber}>{re.chassisNumber}</TableCell>
                   <TableCell className={CELL} title={re.customer || ""}>{re.customer || "-"}</TableCell>
                   <TableCell className={CELL} title={re.model || ""}>{re.model || "-"}</TableCell>

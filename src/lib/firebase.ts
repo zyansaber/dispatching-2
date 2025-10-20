@@ -14,7 +14,7 @@ declare global { interface Window { XLSX?: any } }
 
 // 统一样式
 const CELL = "text-sm leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
-const CELL_VDIV = "border-r border-slate-200 last:border-r-0"; // 竖向浅分隔（最后一列不画线）
+const CELL_VDIV = "border-r border-slate-200 last:border-r-0"; // 竖向浅分隔
 
 // 列宽（避免左右滚动）
 const COLS = [
@@ -369,6 +369,23 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     </TableHead>
   );
 
+  // ✅ 迷你表头：每个车架号块上方都显示（淡色、对齐一致）
+  const MiniHeaderRow: React.FC = () => (
+    <TableRow className="bg-slate-50/80">
+      {/* 左侧色条占位 */}
+      <TableCell className="p-0" />
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Chassis</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 text-center ${CELL_VDIV}`}>GR Days</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Customer</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Model</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>SAP Data</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Scheduled Dealer</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Matched PO No</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Code</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 text-center ${CELL_VDIV}`}>On Hold</TableCell>
+    </TableRow>
+  );
+
   return (
     <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* 自然标题行（不吸附） */}
@@ -403,10 +420,10 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                 ))}
               </colgroup>
 
-              {/* 表头（不吸附） */}
+              {/* 总表头（仅页首出现，不吸附） */}
               <TableHeader className="bg-slate-50 border-y border-slate-200">
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="p-0" /> {/* 左色条占位不画竖线 */}
+                  <TableHead className="p-0" /> {/* 左色条占位 */}
                   <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
                   <SortableHeader sortKey="GR to GI Days" align="center">GR Days</SortableHeader>
                   <SortableHeader sortKey="Customer">Customer</SortableHeader>
@@ -433,6 +450,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
                   return (
                     <React.Fragment key={id}>
+                      {/* ✅ 每个车架号块的迷你表头（淡色） */}
+                      <MiniHeaderRow />
+
                       {/* 第一行：关键信息 */}
                       <TableRow className={`align-top ${rowBg}`}>
                         {/* 左侧分组色条，rowSpan=2 */}

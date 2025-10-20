@@ -9,12 +9,17 @@ import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { toast } from "sonner";
 
-/** 单元格：一行显示 + 溢出省略号（不再换行） */
+// 让 TS 安静（CDN 注入到 window.XLSX）
+declare global {
+  interface Window { XLSX?: any }
+}
+
+/** 单元格：一行显示 + 溢出省略号 */
 const CELL = "text-sm leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
 
-/** 列宽：把 Status / Dealer 移到第二行，因此首行列更少，避免横向滚动 */
+/** 首行列（精简，避免横向滚动） */
 const COLS = [
-  { key: "__bar",            w: 8   }, // 左侧分组竖条
+  { key: "__bar",            w: 8   },
   { key: "Chassis No",       w: 150 },
   { key: "GR to GI Days",    w: 90  },
   { key: "Customer",         w: 150 },
@@ -46,10 +51,9 @@ interface DispatchStatsProps {
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
   onRefresh: () => void;
 }
-
 export const DispatchStats: React.FC<DispatchStatsProps> = ({
   total, invalidStock, snowyStock, canBeDispatched, onHold,
-  onFilterChange, activeFilter = "all", onRefresh
+  onFilterChange, activeFilter = "all"
 }) => {
   const cards = [
     { label: "Total", value: total, filter: "all", color: "text-blue-600" },
@@ -81,7 +85,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== 主表：两行一组 + 左侧色条 + 组间粗分隔 ====================== */
+/* ====================== 主表：两行一组 + 左侧色条 + 组间分隔 ====================== */
 interface DispatchTableProps {
   allData: ProcessedDispatchEntry[];
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
@@ -100,7 +104,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [pickupDraft, setPickupDraft]   = useState<Record<string, string>>({});
 
-  // 乐观更新容器
+  // 乐观更新
   const [optimistic, setOptimistic]     = useState<Record<string, Partial<ProcessedDispatchEntry>>>({});
   const [saving, setSaving]             = useState<Record<string, boolean>>({});
   const [error, setError]               = useState<Record<string, string | undefined>>({});
@@ -131,7 +135,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   const safeIncludes = (v: any, s: string) => v != null && String(v).toLowerCase().includes(s);
 
-  // —— 统一从全量 + 乐观层做筛选/排序 —— //
+  // 合并乐观层
   const baseMerged = useMemo(() => {
     const map: Record<string, ProcessedDispatchEntry> = {};
     for (const e of allData) map[e["Chassis No"]] = { ...e, ...(optimistic[e["Chassis No"]] || {}) };
@@ -212,7 +216,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   const handleToggleOnHold = async (row: ProcessedDispatchEntry, next: boolean) => {
     const id = row["Chassis No"];
     const patch = { OnHold: next, OnHoldAt: new Date().toISOString(), OnHoldBy: "webapp" as const };
-    applyOptimistic(id, patch); // 即时分流
+    applyOptimistic(id, patch);
     setSaving(s => ({ ...s, [id]: true }));
     setError(e => ({ ...e, [id]: undefined }));
     try {
@@ -286,7 +290,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     }
   };
 
-  // ===== Excel 导出（优先用 xlsx，失败回落 CSV） =====
+  // ===== 导出（CDN 版 xlsx 优先，失败回落 CSV） =====
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -315,9 +319,19 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     "Estimated Pickup At": e.EstimatedPickupAt ?? "",
   });
 
+  const loadXLSX = (): Promise<any> => new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve(window.XLSX);
+    const s = document.createElement("script");
+    s.src = "https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js";
+    s.async = true;
+    s.onload = () => resolve(window.XLSX);
+    s.onerror = () => reject(new Error("CDN xlsx load failed"));
+    document.head.appendChild(s);
+  });
+
   const exportExcel = async () => {
     try {
-      const XLSX = await import("xlsx"); // 需要在项目依赖里安装：pnpm add xlsx
+      const XLSX = await loadXLSX(); // 运行时从 CDN 加载
       const active = activeRows.map(toPlainRow);
       const onhold = onHoldRows.map(toPlainRow);
 
@@ -330,8 +344,8 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
       const wbout = XLSX.write(wb, { type: "array", bookType: "xlsx" });
       downloadBlob(new Blob([wbout], { type: "application/octet-stream" }), `dispatch_${new Date().toISOString().slice(0,10)}.xlsx`);
       toast.success("Excel 导出完成");
-    } catch (err) {
-      // 回落：导出 CSV（两个文件）
+    } catch {
+      // 回落 CSV
       const rowsToCsv = (rows: any[]) => {
         if (!rows.length) return "";
         const headers = Object.keys(rows[0]);
@@ -344,7 +358,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
       const onhold = onHoldRows.map(toPlainRow);
       downloadBlob(new Blob([rowsToCsv(active)], { type: "text/csv;charset=utf-8" }), `dispatch_active_${new Date().toISOString().slice(0,10)}.csv`);
       downloadBlob(new Blob([rowsToCsv(onhold)], { type: "text/csv;charset=utf-8" }), `dispatch_onhold_${new Date().toISOString().slice(0,10)}.csv`);
-      toast.message("未安装 xlsx，已回落为 CSV 导出");
+      toast.message("Excel 依赖不可用，已回落为 CSV 导出");
     }
   };
 
@@ -412,7 +426,6 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   const id = entry["Chassis No"];
                   const barColor = getGRDaysColor(entry["GR to GI Days"] || 0);
                   const barWidth = getGRDaysWidth(entry["GR to GI Days"] || 0, maxGRDays);
-                  const isLoading = sendingEmail === id;
                   const zebra = idx % 2 === 0 ? "bg-white" : "bg-gray-50";
                   const groupShadow = "shadow-[0_0_0_1px_rgba(0,0,0,0.04)]";
 
@@ -460,7 +473,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* 第二行：编辑 & 扩展信息（含 Reallocation、Checks、Actions） */}
+                      {/* 第二行：编辑 & 扩展信息（含 Checks、Reallocation(红)、Actions） */}
                       <TableRow className={`${zebra} ${groupShadow}`}>
                         {/* 第二行占据首行剩余 9 列（不含最左边色条列） */}
                         <TableCell colSpan={9}>
@@ -495,15 +508,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </Button>
                             </div>
 
-                            {/* Reallocation（第二行） */}
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-500 w-32 shrink-0">Reallocation</span>
-                              <div className={`${CELL} w-full`} title={entry.reallocatedTo || ""}>
-                                {entry.reallocatedTo || "-"}
-                              </div>
-                            </div>
-
-                            {/* Checks（紧挨 Actions） */}
+                            {/* Checks（与 Reallocation、Actions 并排） */}
                             <div className="flex items-center gap-3 min-w-0">
                               <span className="text-[13px] text-gray-500 w-40 shrink-0">Checks (Status + Dealer)</span>
                               <span
@@ -521,6 +526,17 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                                 title={`Dealer: ${entry.DealerCheck || "-"}`}
                               >
                                 Dealer: {entry.DealerCheck || "-"}
+                              </span>
+                            </div>
+
+                            {/* ✅ Reallocation（紧挨 Checks，红色高亮） */}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-[13px] text-gray-500 w-32 shrink-0">Reallocation</span>
+                              <span
+                                className={`px-2 py-1 rounded text-xs ${entry.reallocatedTo ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-500'}`}
+                                title={entry.reallocatedTo || "-"}
+                              >
+                                {entry.reallocatedTo || "-"}
                               </span>
                             </div>
 
@@ -553,11 +569,10 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* 组间粗分隔空白（你也可以换成 2px 灰线） */}
+                      {/* 组间粗分隔空白 */}
                       <TableRow>
                         <TableCell colSpan={10} className="p-0">
                           <div className="h-6" />
-                          {/* 或粗线：<div className="h-[2px] bg-gray-200" /> */}
                         </TableCell>
                       </TableRow>
                     </React.Fragment>
@@ -569,7 +584,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 看板 */}
+      {/* On Hold 卡片区 */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}

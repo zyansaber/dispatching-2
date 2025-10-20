@@ -40,7 +40,7 @@ try {
   sendReportEmail = async () => false;
 }
 
-/* ====================== 顶部统计卡片 - 增强视觉 ====================== */
+/* ====================== 顶部统计卡片 ====================== */
 interface DispatchStatsProps {
   total: number;
   invalidStock: number;
@@ -57,37 +57,27 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   onFilterChange, activeFilter = "all"
 }) => {
   const cards = [
-    { label: "Total", value: total, filter: "all", color: "text-blue-600", bgGradient: "from-blue-50 to-blue-100" },
-    { label: "Invalid", value: invalidStock, filter: "invalid", color: "text-red-600", bgGradient: "from-red-50 to-red-100" },
-    { label: "Snowy Stock", value: snowyStock, filter: "snowy", color: "text-purple-600", bgGradient: "from-purple-50 to-purple-100" },
-    { label: "Can Dispatch", value: canBeDispatched, filter: "canBeDispatched", color: "text-emerald-600", bgGradient: "from-emerald-50 to-emerald-100" },
-    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold", color: "text-amber-600", bgGradient: "from-amber-50 to-amber-100" } as const] : []),
+    { label: "Total", value: total, filter: "all", color: "text-blue-600" },
+    { label: "Invalid", value: invalidStock, filter: "invalid", color: "text-red-600" },
+    { label: "Snowy Stock", value: snowyStock, filter: "snowy", color: "text-purple-600" },
+    { label: "Can Dispatch", value: canBeDispatched, filter: "canBeDispatched", color: "text-emerald-600" },
+    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold", color: "text-amber-600" } as const] : []),
   ] as const;
 
   return (
     <div className="space-y-4 w-full max-w-full overflow-x-hidden">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {cards.map((card) => (
           <Card
             key={card.filter}
-            className={`cursor-pointer transition-all duration-300 hover:shadow-xl hover:scale-105 border-2 ${
-              activeFilter === card.filter 
-                ? `ring-2 ring-offset-2 ring-blue-500 shadow-lg bg-gradient-to-br ${card.bgGradient}` 
-                : "hover:border-blue-300 bg-white"
-            }`}
+            className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === card.filter ? "ring-2 ring-blue-500" : ""}`}
             onClick={() => onFilterChange(card.filter as any)}
           >
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-gray-600 truncate tracking-wide">
-                {card.label}
-              </CardTitle>
+              <CardTitle className="text-[13px] font-medium text-gray-600 truncate">{card.label}</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className={`text-3xl font-bold ${card.color} transition-all duration-300 ${
-                activeFilter === card.filter ? 'scale-110' : ''
-              }`}>
-                {card.value.toLocaleString()}
-              </div>
+              <div className={`text-2xl font-semibold ${card.color}`}>{card.value}</div>
             </CardContent>
           </Card>
         ))}
@@ -96,7 +86,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== 主表：增强视觉效果 + 吸顶标题 ====================== */
+/* ====================== 主表：两行一组 + 左侧色条 + 组间分隔 ====================== */
 interface DispatchTableProps {
   allData: ProcessedDispatchEntry[];
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
@@ -374,7 +364,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   const SortableHeader = ({ children, sortKey, className = "", align = "left" as "left" | "center" }: { children: React.ReactNode; sortKey: string; className?: string; align?: "left" | "center" }) => (
     <TableHead 
-      className={`cursor-pointer hover:bg-blue-50 transition-colors align-top ${align === "center" ? "text-center" : ""} ${className}`} 
+      className={`cursor-pointer hover:bg-gray-50 transition-colors align-top ${align === "center" ? "text-center" : ""} ${className}`} 
       onClick={() => handleSort(sortKey)}
     >
       <div className={`flex ${align === "center" ? "justify-center" : ""} items-center gap-1`}>
@@ -385,52 +375,43 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   );
 
   return (
-    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
-      {/* 主表 - 增强设计 */}
-      <Card className="w-full max-w-full shadow-lg border-gray-200">
-        {/* ✅ 吸顶标题栏 - 增强视觉效果 */}
-        <CardHeader className="sticky top-0 z-20 bg-gradient-to-r from-white via-blue-50 to-white backdrop-blur-md shadow-md border-b-2 border-blue-100">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-1.5 h-8 bg-gradient-to-b from-blue-500 to-blue-700 rounded-full shadow-sm" />
-              <CardTitle className="text-xl font-bold tracking-tight bg-gradient-to-r from-gray-900 via-blue-900 to-gray-900 bg-clip-text text-transparent">
-                Dispatch Data
-              </CardTitle>
-              <div className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
-                {activeRows.length} Active
-              </div>
-            </div>
-            <div className="flex items-center gap-3 w-full md:w-auto">
-              <Input
-                placeholder="🔍 Search chassis / dealer / PO / comment ..."
-                value={searchTerm}
-                onChange={(e) => onSearchChange(e.target.value)}
-                className="w-full md:max-w-sm transition-all duration-200 focus:w-full md:focus:max-w-md border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-              />
-              <Button 
-                variant="outline" 
-                className="shrink-0 border-blue-300 hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 shadow-sm font-semibold" 
-                onClick={exportExcel}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-            </div>
-          </div>
+    <div className="space-y-8 w-full max-w-full overflow-x-hidden">
+      {/* ✅ 非吸顶：仅一个自然标题，不会重叠 */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold tracking-tight">Dispatch Data</h2>
+        <div className="flex items-center gap-3">
+          <Input
+            placeholder="Search chassis / dealer / PO / comment ..."
+            value={searchTerm}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="w-[280px]"
+          />
+          <Button variant="outline" className="shrink-0" onClick={exportExcel}>
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </Button>
+        </div>
+      </div>
+
+      {/* 主表（无任何 sticky） */}
+      <Card className="w-full max-w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm text-gray-600">Summary</CardTitle>
         </CardHeader>
 
         <CardContent className="p-0">
           <div className="w-full max-w-full overflow-x-hidden">
             <Table className="w-full table-fixed">
+              {/* 定宽列，保证行内不换行 + 水平齐整 */}
               <colgroup>
                 {COLS.map((c) => (
                   <col key={c.key} style={{ width: c.w === 8 ? "8px" : `${c.w}px` }} />
                 ))}
               </colgroup>
 
-              {/* ✅ 吸顶表头：固定在标题之下 - 增强样式 */}
-              <TableHeader className="sticky top-[72px] z-10 bg-gradient-to-r from-gray-50 via-blue-50 to-gray-50 backdrop-blur-sm border-b-2 border-gray-200 shadow-sm">
-                <TableRow className="hover:bg-transparent">
+              {/* ⚠️ 不再使用粘顶表头 */}
+              <TableHeader className="bg-gray-50 border-b">
+                <TableRow>
                   <TableHead className="p-0" />
                   <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
                   <SortableHeader sortKey="GR to GI Days" align="center">GR Days</SortableHeader>
@@ -449,31 +430,31 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   const id = entry["Chassis No"];
                   const barColor = getGRDaysColor(entry["GR to GI Days"] || 0);
                   const barWidth = getGRDaysWidth(entry["GR to GI Days"] || 0, maxGRDays);
-                  const zebra = idx % 2 === 0 ? "bg-white" : "bg-gradient-to-r from-gray-50/50 to-transparent";
-                  const groupShadow = "shadow-sm hover:shadow-md transition-all duration-200";
+                  const zebra = idx % 2 === 0 ? "bg-white" : "bg-gray-50";
+                  const groupShadow = "shadow-[0_0_0_1px_rgba(0,0,0,0.04)]";
 
                   const commentValue = commentDraft[id] ?? (entry.Comment ?? "");
                   const pickupLocal  = pickupDraft[id]  ?? (entry.EstimatedPickupAt ? isoToLocal(entry.EstimatedPickupAt) : "");
 
                   return (
                     <React.Fragment key={id}>
-                      {/* 第一行：关键信息 - 增强视觉 */}
-                      <TableRow className={`align-top ${zebra} ${groupShadow} border-l-4 border-l-transparent hover:border-l-blue-500`}>
-                        {/* 左侧分组色条 */}
+                      {/* 第一行：关键信息 */}
+                      <TableRow className={`align-top ${zebra} ${groupShadow}`}>
+                        {/* 左侧分组色条，rowSpan=2 */}
                         <TableCell rowSpan={2} className="p-0">
-                          <div className="h-full w-2 rounded-l-md bg-gradient-to-b from-blue-400 via-blue-500 to-blue-600 shadow-sm" />
+                          <div className="h-full w-1 rounded-l-md bg-blue-500" />
                         </TableCell>
 
                         <TableCell className={`font-semibold text-gray-900 ${CELL}`} title={id}>{id}</TableCell>
 
                         <TableCell className={`text-center ${CELL}`} title={String(entry["GR to GI Days"] ?? "-")}>
                           <div className="inline-flex flex-col items-stretch w-full">
-                            <div className="flex justify-between text-xs font-medium">
+                            <div className="flex justify-between text-xs">
                               <span className="text-gray-900">{entry["GR to GI Days"] ?? "-"}</span>
                               <span className="text-gray-500">days</span>
                             </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2 mt-1 shadow-inner">
-                              <div className={`h-2 rounded-full ${barColor} transition-all duration-300 shadow-sm`} style={{ width: `${barWidth}%` }} />
+                            <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                              <div className={`h-2 rounded-full ${barColor}`} style={{ width: `${barWidth}%` }} />
                             </div>
                           </div>
                         </TableCell>
@@ -488,11 +469,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         <TableCell className="text-center">
                           <Button
                             size="sm"
-                            className={`transition-all duration-200 font-semibold shadow-md ${
-                              entry.OnHold 
-                                ? "bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white" 
-                                : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white"
-                            }`}
+                            className={entry.OnHold ? "bg-red-600 text-white" : "bg-amber-500 text-white"}
                             disabled={saving[id]}
                             onClick={() => handleToggleOnHold(entry, !entry.OnHold)}
                           >
@@ -501,66 +478,54 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* 第二行：编辑 & 扩展 - 增强背景 */}
-                      <TableRow className={`${zebra} ${groupShadow} border-l-4 border-l-transparent hover:border-l-blue-500`}>
+                      {/* 第二行：编辑 & 扩展（Checks + Reallocation 红、Actions） */}
+                      <TableRow className={`${zebra} ${groupShadow}`}>
                         <TableCell colSpan={9}>
-                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 py-4 px-3 bg-gradient-to-r from-blue-50/30 via-transparent to-purple-50/30 rounded-lg">
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 py-4 px-2">
                             {/* Comment */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-semibold text-gray-600 w-28 shrink-0 uppercase tracking-wide">Comment</span>
+                              <span className="text-[13px] text-gray-600 w-28 shrink-0">Comment</span>
                               <Input
-                                className="w-full max-w-[320px] border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all shadow-sm"
+                                className="w-full max-w-[320px]"
                                 placeholder="Add a comment"
                                 value={commentValue}
                                 onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
                                 onKeyDown={(e) => { if (e.key === "Enter") handleSaveComment(entry); }}
                               />
-                              <Button 
-                                size="sm" 
-                                variant="secondary" 
-                                disabled={saving[id]} 
-                                onClick={() => handleSaveComment(entry)}
-                                className="shadow-sm hover:shadow-md transition-all font-semibold"
-                              >
+                              <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handleSaveComment(entry)}>
                                 Save
                               </Button>
                             </div>
 
                             {/* Estimated pickup */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-semibold text-gray-600 w-28 shrink-0 uppercase tracking-wide">Pickup</span>
+                              <span className="text-[13px] text-gray-600 w-28 shrink-0">Pickup</span>
                               <input
                                 type="datetime-local"
-                                className="px-3 py-1.5 border border-gray-300 rounded-md w-full max-w-[260px] focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all shadow-sm"
+                                className="px-2 py-1 border rounded w-full max-w-[260px]"
                                 min={minLocalNow}
                                 value={pickupLocal}
                                 onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
                               />
-                              <Button 
-                                size="sm" 
-                                variant="secondary" 
-                                disabled={saving[id]} 
-                                onClick={() => handleSavePickup(entry)}
-                                className="shadow-sm hover:shadow-md transition-all font-semibold"
-                              >
+                              <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handleSavePickup(entry)}>
                                 Save
                               </Button>
                             </div>
 
                             {/* Checks */}
                             <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-xs font-semibold text-gray-600 w-20 shrink-0 uppercase tracking-wide">Checks</span>
+                              <span className="text-[13px] text-gray-600 w-24 shrink-0">Checks</span>
                               <span
-                                className={`px-3 py-1 rounded-full text-xs font-semibold shadow-sm ${
-                                  entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'
+                                className={`px-2 py-1 rounded-full text-xs ${
+                                  entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                                 }`}
                                 title={`Status: ${entry.Statuscheck || "-"}`}
                               >
                                 Status: {entry.Statuscheck || "-"}
                               </span>
                               <span
-                                className={`px-3 py-1 rounded-full text-xs font-semibold shadow-sm ${
-                                  entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'
+                                className={`px-2 py-1 rounded-full text-xs ${
+                                  entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                                 }`}
                                 title={`Dealer: ${entry.DealerCheck || "-"}`}
                               >
@@ -570,13 +535,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
                             {/* ✅ Reallocation（红色高亮） */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-semibold text-gray-600 w-28 shrink-0 uppercase tracking-wide">Reallocation</span>
+                              <span className="text-[13px] text-gray-600 w-28 shrink-0">Reallocation</span>
                               <span
-                                className={`px-3 py-1.5 rounded-md text-xs font-semibold shadow-sm ${
-                                  entry.reallocatedTo 
-                                    ? 'bg-gradient-to-r from-red-50 to-red-100 text-red-700 border-2 border-red-300' 
-                                    : 'bg-gray-100 text-gray-500 border border-gray-200'
-                                }`}
+                                className={`px-2 py-1 rounded text-xs ${entry.reallocatedTo ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-500'}`}
                                 title={entry.reallocatedTo || "-"}
                               >
                                 {entry.reallocatedTo || "-"}
@@ -585,22 +546,22 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
                             {/* Actions（Report） */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-semibold text-gray-600 w-20 shrink-0 uppercase tracking-wide">Actions</span>
+                              <span className="text-[13px] text-gray-600 w-20 shrink-0">Actions</span>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleReportError(id)}
                                 disabled={sendingEmail === id}
-                                className="inline-flex items-center gap-1.5 text-xs font-semibold border-amber-300 hover:border-amber-500 hover:bg-amber-50 transition-all shadow-sm"
+                                className="inline-flex items-center gap-1 text-xs"
                               >
                                 {sendingEmail === id ? (
                                   <>
-                                    <Mail className="h-3.5 w-3.5 animate-pulse" />
+                                    <Mail className="h-3 w-3 animate-pulse" />
                                     <span className="hidden sm:inline">Sending...</span>
                                   </>
                                 ) : (
                                   <>
-                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                    <AlertTriangle className="h-3 w-3" />
                                     <span className="hidden sm:inline">Report</span>
                                   </>
                                 )}
@@ -608,18 +569,14 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                             </div>
                           </div>
 
-                          {error[id] && (
-                            <div className="text-xs text-red-600 mt-2 px-3 py-2 bg-red-50 rounded-md border border-red-200 font-medium">
-                              {error[id]}
-                            </div>
-                          )}
+                          {error[id] && <div className="text-xs text-red-600 mt-1">{error[id]}</div>}
                         </TableCell>
                       </TableRow>
 
                       {/* 组间分隔 */}
                       <TableRow>
                         <TableCell colSpan={10} className="p-0">
-                          <div className="h-4 bg-gradient-to-r from-transparent via-gray-100 to-transparent" />
+                          <div className="h-5" />
                         </TableCell>
                       </TableRow>
                     </React.Fragment>
@@ -631,7 +588,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 卡片区 */}
+      {/* On Hold 卡片区（自带标题；非吸顶） */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}
@@ -646,7 +603,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   );
 };
 
-/* ====================== On Hold 卡片：增强视觉 ====================== */
+/* ====================== On Hold 卡片 ====================== */
 const OnHoldBoard: React.FC<{
   rows: ProcessedDispatchEntry[];
   saving: Record<string, boolean>;
@@ -665,38 +622,29 @@ const OnHoldBoard: React.FC<{
 }) => {
   if (!rows.length) return null;
   return (
-    <Card className="w-full max-w-full overflow-x-hidden shadow-lg border-gray-200">
-      <CardHeader className="bg-gradient-to-r from-amber-50 via-red-50 to-amber-50 border-b-2 border-amber-200">
+    <Card className="w-full max-w-full">
+      <CardHeader>
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-8 bg-gradient-to-b from-red-500 to-red-700 rounded-full shadow-sm" />
-          <CardTitle className="text-xl font-bold tracking-tight bg-gradient-to-r from-red-700 via-amber-700 to-red-700 bg-clip-text text-transparent">
-            On Hold
-          </CardTitle>
-          <div className="px-3 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full shadow-sm">
+          <div className="w-1.5 h-6 bg-red-600 rounded-full" />
+          <CardTitle className="text-lg font-semibold tracking-tight">On Hold</CardTitle>
+          <div className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-semibold rounded-full">
             {rows.length} Items
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-5 items-stretch w-full max-w-full">
+      <CardContent>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 items-stretch w-full max-w-full">
           {rows.map((row, idx) => {
             const id = row["Chassis No"];
             const commentValue = commentDraft[id] ?? (row.Comment ?? "");
             const pickupLocal  = pickupDraft[id]  ?? (row.EstimatedPickupAt ? new Date(row.EstimatedPickupAt).toISOString().slice(0,16) : "");
             return (
-              <div 
-                key={id} 
-                className={`h-full min-h-[300px] flex flex-col rounded-xl border-2 p-5 shadow-md hover:shadow-xl transition-all duration-300 ${
-                  idx % 2 
-                    ? "bg-gradient-to-br from-amber-50 to-red-50 border-amber-200" 
-                    : "bg-white border-gray-200"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3 pb-3 border-b-2 border-gray-200">
-                  <div className="font-bold text-base text-gray-900 break-words break-all hyphens-auto">{id}</div>
+              <div key={id} className={`h-full min-h-[280px] flex flex-col rounded-xl border p-4 shadow-sm ${idx % 2 ? "bg-gray-50" : "bg-white"}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-sm break-words break-all hyphens-auto">{id}</div>
                   <Button
                     size="sm"
-                    className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white shadow-md font-semibold transition-all"
+                    className="bg-red-600 text-white"
                     disabled={saving[id]}
                     onClick={() => handlers.handleToggleOnHold(row, false)}
                   >
@@ -704,41 +652,23 @@ const OnHoldBoard: React.FC<{
                   </Button>
                 </div>
 
-                <div className="mt-4 text-sm space-y-2 flex-1 min-h-[130px]">
-                  <div className={`${CELL} py-1`}>
-                    <span className="text-gray-500 font-semibold">Customer: </span>
-                    <span className="text-gray-900">{row.Customer || "-"}</span>
-                  </div>
-                  <div className={`${CELL} py-1`}>
-                    <span className="text-gray-500 font-semibold">Model: </span>
-                    <span className="text-gray-900">{row.Model || "-"}</span>
-                  </div>
-                  <div className={`${CELL} py-1`}>
-                    <span className="text-gray-500 font-semibold">Code: </span>
-                    <span className="text-gray-900">{row.Code || "-"}</span>
-                  </div>
-                  <div className={`${CELL} py-1`}>
-                    <span className="text-gray-500 font-semibold">Matched PO: </span>
-                    <span className="text-gray-900">{row["Matched PO No"] || "-"}</span>
-                  </div>
+                <div className="mt-2 text-sm space-y-1 flex-1 min-h-[120px]">
+                  <div className={CELL}><span className="text-gray-500">Customer：</span>{row.Customer || "-"}</div>
+                  <div className={CELL}><span className="text-gray-500">Model：</span>{row.Model || "-"}</div>
+                  <div className={CELL}><span className="text-gray-500">Code：</span>{row.Code || "-"}</div>
+                  <div className={CELL}><span className="text-gray-500">Matched PO：</span>{row["Matched PO No"] || "-"}</div>
                 </div>
 
-                <div className="mt-4 space-y-3 pt-3 border-t-2 border-gray-200">
+                <div className="mt-3 space-y-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <Input
-                      className="w-full border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all shadow-sm"
+                      className="w-full max-w-[320px]"
                       placeholder="Add a comment"
                       value={commentValue}
                       onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
                       onKeyDown={(e) => { if (e.key === "Enter") handlers.handleSaveComment(row); }}
                     />
-                    <Button 
-                      size="sm" 
-                      variant="secondary" 
-                      disabled={saving[id]} 
-                      onClick={() => handlers.handleSaveComment(row)}
-                      className="shadow-sm hover:shadow-md transition-all font-semibold"
-                    >
+                    <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handlers.handleSaveComment(row)}>
                       Save
                     </Button>
                   </div>
@@ -746,27 +676,17 @@ const OnHoldBoard: React.FC<{
                   <div className="flex items-center gap-2 min-w-0">
                     <input
                       type="datetime-local"
-                      className="px-3 py-1.5 border border-gray-300 rounded-md w-full focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all shadow-sm"
+                      className="px-2 py-1 border rounded w-full max-w-[260px]"
                       min={new Date().toISOString().slice(0,16)}
                       value={pickupLocal}
                       onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
                     />
-                    <Button 
-                      size="sm" 
-                      variant="secondary" 
-                      disabled={saving[id]} 
-                      onClick={() => handlers.handleSavePickup(row)}
-                      className="shadow-sm hover:shadow-md transition-all font-semibold"
-                    >
+                    <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handlers.handleSavePickup(row)}>
                       Save
                     </Button>
                   </div>
 
-                  {error[id] && (
-                    <div className="text-xs text-red-600 px-3 py-2 bg-red-50 rounded-md border border-red-200 font-medium">
-                      {error[id]}
-                    </div>
-                  )}
+                  {error[id] && <div className="text-xs text-red-600">{error[id]}</div>}
                 </div>
               </div>
             );
@@ -777,7 +697,7 @@ const OnHoldBoard: React.FC<{
   );
 };
 
-/* ====================== ReallocationTable - 增强视觉 ====================== */
+/* ====================== ReallocationTable（保持接口；默认你控制显示/隐藏） ====================== */
 interface ReallocationTableProps {
   data: ProcessedReallocationEntry[];
   searchTerm: string;
@@ -828,10 +748,7 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
   }, [data, dispatchData, searchTerm, sortConfig]);
 
   const SortableHeader = ({ children, sortKey, className = "" }: { children: React.ReactNode; sortKey: string; className?: string }) => (
-    <TableHead 
-      className={`cursor-pointer hover:bg-purple-50 transition-colors ${className}`} 
-      onClick={() => handleSort(sortKey)}
-    >
+    <TableHead className={`cursor-pointer hover:bg-purple-50 transition-colors ${className}`} onClick={() => handleSort(sortKey)}>
       <div className="flex items-center gap-1">
         <span className="truncate font-semibold text-gray-700">{children}</span>
         <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-gray-500" />
@@ -840,31 +757,29 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
   );
 
   return (
-    <Card className="w-full max-w-full overflow-x-hidden shadow-lg border-gray-200">
-      <CardHeader className="bg-gradient-to-r from-purple-50 via-pink-50 to-purple-50 border-b-2 border-purple-200">
+    <Card className="w-full max-w-full">
+      <CardHeader>
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-1.5 h-8 bg-gradient-to-b from-purple-500 to-purple-700 rounded-full shadow-sm" />
-            <CardTitle className="text-xl font-bold bg-gradient-to-r from-purple-700 via-pink-700 to-purple-700 bg-clip-text text-transparent">
-              Reallocation
-            </CardTitle>
-            <div className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full shadow-sm">
+            <div className="w-1.5 h-6 bg-purple-600 rounded-full" />
+            <CardTitle className="text-lg font-bold">Reallocation</CardTitle>
+            <div className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
               {filteredAndSortedData.length} Items
             </div>
           </div>
           <Input
-            placeholder="🔍 Search reallocations..."
+            placeholder="Search reallocations..."
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full sm:max-w-sm transition-all duration-200 border-gray-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+            className="w-full sm:max-w-sm"
           />
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="w-full max-w-full overflow-x-auto">
-          <Table className="w-full">
-            <TableHeader className="bg-gradient-to-r from-gray-50 to-purple-50 sticky top-0 z-10">
-              <TableRow className="hover:bg-transparent">
+        <div className="w-full max-w-full overflow-x-hidden">
+          <Table className="w-full table-fixed">
+            <TableHeader className="bg-gray-50 border-b">
+              <TableRow>
                 <SortableHeader sortKey="chassisNumber">Chassis</SortableHeader>
                 <SortableHeader sortKey="customer">Customer</SortableHeader>
                 <SortableHeader sortKey="model">Model</SortableHeader>
@@ -875,32 +790,15 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredAndSortedData.map((re, idx) => (
-                <TableRow 
-                  key={`${re.chassisNumber}-${re.entryId || re.submitTime || "row"}`}
-                  className={`transition-colors hover:bg-purple-50 ${
-                    idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"
-                  }`}
-                >
-                  <TableCell className={`font-semibold text-gray-900 ${CELL}`} title={re.chassisNumber}>
-                    {re.chassisNumber}
-                  </TableCell>
+              {filteredAndSortedData.map((re) => (
+                <TableRow key={`${re.chassisNumber}-${(re as any).entryId || re.submitTime || "row"}`}>
+                  <TableCell className={`font-semibold text-gray-900 ${CELL}`} title={re.chassisNumber}>{re.chassisNumber}</TableCell>
                   <TableCell className={CELL} title={re.customer || ""}>{re.customer || "-"}</TableCell>
                   <TableCell className={CELL} title={re.model || ""}>{re.model || "-"}</TableCell>
                   <TableCell className={CELL} title={re.originalDealer || ""}>{re.originalDealer || "-"}</TableCell>
-                  <TableCell className={CELL} title={re.reallocatedTo || ""}>
-                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-md text-xs font-semibold">
-                      {re.reallocatedTo || "-"}
-                    </span>
-                  </TableCell>
+                  <TableCell className={CELL} title={re.reallocatedTo || ""}>{re.reallocatedTo || "-"}</TableCell>
                   <TableCell className={CELL} title={re.regentProduction || ""}>{re.regentProduction || "-"}</TableCell>
-                  <TableCell className={CELL} title={re.issue?.type || ""}>
-                    {re.issue?.type ? (
-                      <span className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-xs font-semibold">
-                        {re.issue.type}
-                      </span>
-                    ) : "-"}
-                  </TableCell>
+                  <TableCell className={CELL} title={re.issue?.type || ""}>{re.issue?.type || "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

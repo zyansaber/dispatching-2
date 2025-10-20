@@ -1,826 +1,341 @@
-// src/components/DataTables.tsx
-import React, { useEffect, useMemo, useState } from "react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ArrowUpDown, AlertTriangle, Mail, Download } from "lucide-react";
-import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
-import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
-import { toast } from "sonner";
+// src/lib/firebase.ts
+// 仅包含 Firebase 初始化 + 数据访问/工具函数。不要放任何 React/JSX！
 
-// XLSX（CDN 注入）
-declare global { interface Window { XLSX?: any } }
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, get, push, update } from "firebase/database";
+import type {
+  ReallocationData,
+  DispatchData,
+  ScheduleData,
+  ProcessedReallocationEntry,
+  ProcessedDispatchEntry,
+} from "@/types";
 
-// 统一样式
-const CELL = "text-sm leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
-const CELL_VDIV = "border-r border-slate-200 last:border-r-0"; // 竖向浅分隔
-
-// 列宽（避免左右滚动）
-const COLS = [
-  { key: "__bar",            w: 8   },
-  { key: "Chassis No",       w: 160 },
-  { key: "GR to GI Days",    w: 90  },
-  { key: "Customer",         w: 160 },
-  { key: "Model",            w: 120 },
-  { key: "SAP Data",         w: 170 },
-  { key: "Scheduled Dealer", w: 170 },
-  { key: "Matched PO No",    w: 170 },
-  { key: "Code",             w: 120 },
-  { key: "On Hold",          w: 110 },
-];
-
-// 邮件（可选）
-let sendReportEmail: (data: any) => Promise<boolean>;
-try { sendReportEmail = require("@/lib/emailjs").sendReportEmail; }
-catch { sendReportEmail = async () => false; }
-
-/* ====================== 顶部统计卡片 ====================== */
-interface DispatchStatsProps {
-  total: number;
-  invalidStock: number;
-  snowyStock: number;
-  canBeDispatched: number;
-  onHold?: number;
-  onFilterChange: (filter: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold') => void;
-  activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
-  onRefresh: () => void;
-}
-
-export const DispatchStats: React.FC<DispatchStatsProps> = ({
-  total, invalidStock, snowyStock, canBeDispatched, onHold,
-  onFilterChange, activeFilter = "all"
-}) => {
-  const cards = [
-    { label: "Total", value: total, filter: "all" },
-    { label: "Invalid", value: invalidStock, filter: "invalid" },
-    { label: "Snowy Stock", value: snowyStock, filter: "snowy" },
-    { label: "Can Dispatch", value: canBeDispatched, filter: "canBeDispatched" },
-    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold" } as const] : []),
-  ] as const;
-
-  return (
-    <div className="space-y-4 w-full max-w-full overflow-x-hidden">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-        {cards.map((card) => (
-          <Card
-            key={card.filter}
-            className={`cursor-pointer transition hover:shadow-sm ${activeFilter === card.filter ? "ring-2 ring-blue-500" : ""}`}
-            onClick={() => onFilterChange(card.filter as any)}
-          >
-            <CardHeader className="pb-2">
-              <CardTitle className="text-[13px] font-medium text-slate-600 truncate">{card.label}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold text-slate-900">{card.value}</div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
+// —— 初始化 Firebase ——
+// （如果你的项目里已有初始化，这里保持一致；避免重复初始化）
+const firebaseConfig = {
+  apiKey: "AIzaSyBcczqGj5X1_w9aCX1lOK4-kgz49Oi03Bg",
+  authDomain: "scheduling-dd672.firebaseapp.com",
+  databaseURL:
+    "https://scheduling-dd672-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "scheduling-dd672",
+  storageBucket: "scheduling-dd672.firebasestorage.app",
+  messagingSenderId: "432092773012",
+  appId: "1:432092773012:web:ebc7203ea570b0da2ad281",
 };
 
-/* ====================== 主表 ====================== */
-interface DispatchTableProps {
-  allData: ProcessedDispatchEntry[];
-  activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
-  searchTerm: string;
-  onSearchChange: (term: string) => void;
-  reallocationData: ProcessedReallocationEntry[];
+const app = initializeApp(firebaseConfig);
+export const database = getDatabase(app);
+
+// —— 工具：转义 RTDB 的 key ——
+// （Firebase RTDB key 不允许 . # $ [ ] / 等字符）
+export function escapeKey(key: string) {
+  return key.replace(/[.#$\[\]\/]/g, "_");
 }
 
-export const DispatchTable: React.FC<DispatchTableProps> = ({
-  allData, activeFilter = "all", searchTerm, onSearchChange, reallocationData
-}) => {
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc'; } | null>(null);
-  const [sendingEmail, setSendingEmail] = useState<string | null>(null);
+// —— Dispatch 节点的引用/局部更新 ——
+// 路径：/Dispatch/<Chassis No>
+export function dispatchRef(chassisNo: string) {
+  return ref(database, `Dispatch/${escapeKey(chassisNo)}`);
+}
 
-  // 行内编辑
-  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
-  const [pickupDraft, setPickupDraft]   = useState<Record<string, string>>({});
+export async function patchDispatch(
+  chassisNo: string,
+  data: Record<string, any>
+) {
+  await update(dispatchRef(chassisNo), data);
+}
 
-  // 乐观
-  const [optimistic, setOptimistic]     = useState<Record<string, Partial<ProcessedDispatchEntry>>>({});
-  const [saving, setSaving]             = useState<Record<string, boolean>>({});
-  const [error, setError]               = useState<Record<string, string | undefined>>({});
+// —— 通用读取 ——
+// 这些函数供页面加载数据源使用
+export const fetchReallocationData = async (): Promise<ReallocationData> => {
+  try {
+    const snapshot = await get(ref(database, "reallocation"));
+    return snapshot.val() || {};
+  } catch (error) {
+    console.error("Error fetching reallocation data:", error);
+    return {};
+  }
+};
 
-  useEffect(() => {
-    if (!allData?.length) return;
-    setOptimistic((cur) => {
-      const next = { ...cur };
-      for (const id of Object.keys(cur)) {
-        const base = allData.find(e => e["Chassis No"] === id);
-        if (!base) continue;
-        const p = cur[id];
-        const inSync =
-          (p.OnHold === undefined || p.OnHold === base.OnHold) &&
-          (p.Comment === undefined || p.Comment === base.Comment) &&
-          (p.EstimatedPickupAt === undefined || p.EstimatedPickupAt === base.EstimatedPickupAt);
-        if (inSync) delete next[id];
-      }
-      return next;
+export const fetchDispatchData = async (): Promise<DispatchData> => {
+  try {
+    const snapshot = await get(ref(database, "Dispatch"));
+    return snapshot.val() || {};
+  } catch (error) {
+    console.error("Error fetching dispatch data:", error);
+    return {};
+  }
+};
+
+export const fetchScheduleData = async (): Promise<ScheduleData> => {
+  try {
+    const snapshot = await get(ref(database, "schedule"));
+    return snapshot.val() || [];
+  } catch (error) {
+    console.error("Error fetching schedule data:", error);
+    return [];
+  }
+};
+
+// —— 错误上报（写入 /dispatchError） ——
+export const reportError = async (
+  chassisNo: string,
+  errorDetails: string
+): Promise<boolean> => {
+  try {
+    const errorData = {
+      chassisNo,
+      errorDetails,
+      timestamp: new Date().toISOString(),
+      status: "reported",
+    };
+    await push(ref(database, "dispatchError"), errorData);
+    return true;
+  } catch (error) {
+    console.error("Error reporting error:", error);
+    return false;
+  }
+};
+
+// —— 日期工具（DD/MM/YYYY 解析） ——
+const parseDDMMYYYY = (dateString: string): Date => {
+  if (!dateString || typeof dateString !== "string") return new Date(0);
+  const parts = dateString.trim().split("/");
+  if (parts.length !== 3) return new Date(0);
+  const day = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10) - 1;
+  const year = parseInt(parts[2], 10);
+  if (
+    isNaN(day) ||
+    isNaN(month) ||
+    isNaN(year) ||
+    day < 1 ||
+    day > 31 ||
+    month < 0 ||
+    month > 11 ||
+    year < 1900
+  )
+    return new Date(0);
+  return new Date(year, month, day);
+};
+
+// —— 业务处理函数（留给原页面使用） ——
+
+// 校验 Dealer
+export const validateDealerCheck = (
+  sapData: string | undefined,
+  scheduledDealer: string | undefined,
+  reallocatedTo: string | undefined
+): string => {
+  if (
+    sapData &&
+    scheduledDealer &&
+    reallocatedTo &&
+    sapData === scheduledDealer &&
+    scheduledDealer === reallocatedTo
+  ) {
+    return "OK";
+  }
+  if (sapData && scheduledDealer && sapData === scheduledDealer && !reallocatedTo) {
+    return "OK";
+  }
+  return "Mismatch";
+};
+
+// 处理 Reallocation
+export const processReallocationData = (
+  reallocationData: ReallocationData,
+  scheduleData: ScheduleData
+): ProcessedReallocationEntry[] => {
+  const processed: ProcessedReallocationEntry[] = [];
+
+  const chassisToRegentProduction = new Map<string, string>();
+  scheduleData.forEach((entry) => {
+    chassisToRegentProduction.set(entry.Chassis, entry["Regent Production"]);
+  });
+
+  Object.entries(reallocationData).forEach(([chassisNumber, entries]) => {
+    const entryIds = Object.keys(entries);
+    if (entryIds.length === 0) return;
+
+    const latestEntryId = entryIds.reduce((latest, current) => {
+      const latestDate = parseDDMMYYYY(
+        entries[latest].date || entries[latest].submitTime
+      );
+      const currentDate = parseDDMMYYYY(
+        entries[current].date || entries[current].submitTime
+      );
+      return currentDate > latestDate ? current : latest;
     });
-  }, [allData]);
 
-  const handleSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
-    setSortConfig({ key, direction });
-  };
+    const latestEntry = entries[latestEntryId];
+    const regentProduction = chassisToRegentProduction.get(chassisNumber);
+    if (regentProduction === "Finished") return;
 
-  const safeIncludes = (v: any, s: string) => v != null && String(v).toLowerCase().includes(s);
-
-  // 合并乐观层
-  const baseMerged = useMemo(() => {
-    const map: Record<string, ProcessedDispatchEntry> = {};
-    for (const e of allData) map[e["Chassis No"]] = { ...e, ...(optimistic[e["Chassis No"]] || {}) };
-    return Object.values(map);
-  }, [allData, optimistic]);
-
-  const filtered = useMemo(() => {
-    const s = (searchTerm || "").toLowerCase();
-    let arr = baseMerged;
-    if (activeFilter === "invalid")   arr = arr.filter(e => e.Statuscheck !== "OK");
-    if (activeFilter === "onHold")    arr = arr.filter(e => e.OnHold === true);
-    if (activeFilter === "snowy")     arr = arr.filter(e => e.reallocatedTo === "Snowy Stock" || e["Scheduled Dealer"] === "Snowy Stock");
-    if (activeFilter === "canBeDispatched") arr = arr.filter(e => e.Statuscheck === "OK" && !(e.reallocatedTo === "Snowy Stock" || e["Scheduled Dealer"] === "Snowy Stock"));
-
-    if (s) {
-      arr = arr.filter(entry => {
-        const d = entry;
-        const reMatch = reallocationData.some(re =>
-          re.chassisNumber === d["Chassis No"] &&
-          (safeIncludes(re.customer, s) || safeIncludes(re.model, s) || safeIncludes(re.reallocatedTo, s) || safeIncludes(re.issue?.type, s))
-        );
-        return (
-          safeIncludes(d["Chassis No"], s) ||
-          safeIncludes(d.Customer, s) ||
-          safeIncludes(d.Model, s) ||
-          safeIncludes(d["Matched PO No"], s) ||
-          safeIncludes(d["SAP Data"], s) ||
-          safeIncludes(d["Scheduled Dealer"], s) ||
-          safeIncludes(d.Code, s) ||
-          safeIncludes(d.Statuscheck, s) ||
-          safeIncludes(d.DealerCheck, s) ||
-          safeIncludes(d.reallocatedTo, s) ||
-          safeIncludes(d.Comment, s) ||
-          safeIncludes(d.EstimatedPickupAt, s) ||
-          reMatch
-        );
-      });
-    }
-
-    if (sortConfig) {
-      const { key, direction } = sortConfig;
-      arr = [...arr].sort((a: any, b: any) => {
-        const av = a[key], bv = b[key];
-        if (key === "GR to GI Days") {
-          return direction === 'asc' ? (Number(av)||0) - (Number(bv)||0) : (Number(bv)||0) - (Number(av)||0);
-        }
-        return direction === 'asc'
-          ? String(av ?? '').localeCompare(String(bv ?? ''), undefined, { sensitivity: "base" })
-          : String(bv ?? '').localeCompare(String(av ?? ''), undefined, { sensitivity: "base" });
-      });
-    }
-    return arr;
-  }, [baseMerged, searchTerm, activeFilter, sortConfig, reallocationData]);
-
-  const activeRows = filtered.filter(e => !e.OnHold);
-  const onHoldRows = filtered.filter(e =>  e.OnHold);
-
-  const maxGRDays = Math.max(...baseMerged.map(e => e["GR to GI Days"] || 0), 1);
-
-  // 日期
-  const isoToLocal = (iso?: string | null) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-  const localToIso = (v: string) => (v ? new Date(v).toISOString() : null);
-  const minLocalNow = useMemo(() => {
-    const now = new Date();
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    return `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  }, []);
-
-  // 乐观写库
-  const applyOptimistic = (id: string, patch: Partial<ProcessedDispatchEntry>) =>
-    setOptimistic((m) => ({ ...m, [id]: { ...(m[id] || {}), ...patch } }));
-
-  const handleToggleOnHold = async (row: ProcessedDispatchEntry, next: boolean) => {
-    const id = row["Chassis No"];
-    const patch = { OnHold: next, OnHoldAt: new Date().toISOString(), OnHoldBy: "webapp" as const };
-    applyOptimistic(id, patch);
-    setSaving(s => ({ ...s, [id]: true }));
-    setError(e => ({ ...e, [id]: undefined }));
-    try {
-      await patchDispatch(id, patch);
-    } catch (err: any) {
-      setOptimistic(m => { const prev = { ...(m[id] || {}) }; delete prev.OnHold; delete prev.OnHoldAt; delete prev.OnHoldBy; return { ...m, [id]: prev }; });
-      setError(e => ({ ...e, [id]: err?.message || "Update failed" }));
-    } finally {
-      setSaving(s => ({ ...s, [id]: false }));
-    }
-  };
-
-  const handleSaveComment = async (row: ProcessedDispatchEntry) => {
-    const id = row["Chassis No"];
-    const value = commentDraft[id] ?? row.Comment ?? "";
-    applyOptimistic(id, { Comment: value });
-    setSaving(s => ({ ...s, [id]: true }));
-    setError(e => ({ ...e, [id]: undefined }));
-    try {
-      await patchDispatch(id, { Comment: value });
-    } catch (err: any) {
-      setOptimistic(m => { const p = { ...(m[id] || {}) }; delete p.Comment; return { ...m, [id]: p }; });
-      setError(e => ({ ...e, [id]: err?.message || "Update failed" }));
-    } finally {
-      setSaving(s => ({ ...s, [id]: false }));
-    }
-  };
-
-  const handleSavePickup = async (row: ProcessedDispatchEntry) => {
-    const id = row["Chassis No"];
-    const localVal = pickupDraft[id] ?? isoToLocal(row.EstimatedPickupAt);
-    if (localVal) {
-      const picked = new Date(localVal);
-      if (picked < new Date()) {
-        setError(e => ({ ...e, [id]: "Pick-up time must be today or later" }));
-        return;
-      }
-    }
-    const iso = localVal ? localToIso(localVal) : null;
-    applyOptimistic(id, { EstimatedPickupAt: iso });
-    setSaving(s => ({ ...s, [id]: true }));
-    setError(e => ({ ...e, [id]: undefined }));
-    try {
-      await patchDispatch(id, { EstimatedPickupAt: iso });
-    } catch (err: any) {
-      setOptimistic(m => { const p = { ...(m[id] || {}) }; delete p.EstimatedPickupAt; return { ...m, [id]: p }; });
-      setError(e => ({ ...e, [id]: err?.message || "Update failed" }));
-    } finally {
-      setSaving(s => ({ ...s, [id]: false }));
-    }
-  };
-
-  const handleReportError = async (chassisNo: string) => {
-    const entry = baseMerged.find(e => e["Chassis No"] === chassisNo);
-    if (!entry) return;
-    setSendingEmail(chassisNo);
-    try {
-      const ok = await sendReportEmail({
-        chassisNo: entry["Chassis No"],
-        sapData: entry["SAP Data"] || "N/A",
-        scheduledDealer: entry["Scheduled Dealer"] || "N/A",
-        reallocatedTo: entry.reallocatedTo || "No Reallocation",
-      });
-      if (ok) toast.success(`Report sent for ${chassisNo}.`);
-      else toast.error("Failed to send email report.");
-      await reportError(chassisNo, "Dealer check mismatch");
-    } catch {
-      toast.error("Failed to send report.");
-    } finally {
-      setSendingEmail(null);
-    }
-  };
-
-  // 导出
-  const downloadBlob = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  const toPlainRow = (e: ProcessedDispatchEntry) => ({
-    "Chassis No": e["Chassis No"],
-    "GR to GI Days": e["GR to GI Days"] ?? "",
-    Customer: e.Customer ?? "",
-    Model: e.Model ?? "",
-    "SAP Data": e["SAP Data"] ?? "",
-    "Scheduled Dealer": e["Scheduled Dealer"] ?? "",
-    "Matched PO No": e["Matched PO No"] ?? "",
-    Code: e.Code ?? "",
-    "On Hold": e.OnHold ? "Yes" : "No",
-    Status: e.Statuscheck ?? "",
-    Dealer: e.DealerCheck ?? "",
-    Reallocation: e.reallocatedTo ?? "",
-    Comment: e.Comment ?? "",
-    "Estimated Pickup At": e.EstimatedPickupAt ?? "",
+    processed.push({
+      ...latestEntry,
+      chassisNumber,
+      entryId: latestEntryId,
+      regentProduction: regentProduction || "N/A",
+    });
   });
 
-  const loadXLSX = (): Promise<any> => new Promise((resolve, reject) => {
-    if (window.XLSX) return resolve(window.XLSX);
-    const s = document.createElement("script");
-    s.src = "https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js";
-    s.async = true;
-    s.onload = () => resolve(window.XLSX);
-    s.onerror = () => reject(new Error("CDN xlsx load failed"));
-    document.head.appendChild(s);
+  return processed;
+};
+
+// 处理 Dispatch
+export const processDispatchData = (
+  dispatchData: DispatchData,
+  reallocationData: ReallocationData
+): ProcessedDispatchEntry[] => {
+  const processed: ProcessedDispatchEntry[] = [];
+
+  const chassisToReallocatedTo = new Map<string, string>();
+  Object.entries(reallocationData).forEach(([chassisNumber, entries]) => {
+    const entryIds = Object.keys(entries);
+    if (entryIds.length > 0) {
+      const latestEntryId = entryIds.reduce((latest, current) => {
+        const latestDate = parseDDMMYYYY(
+          entries[latest].date || entries[latest].submitTime
+        );
+        const currentDate = parseDDMMYYYY(
+          entries[current].date || entries[current].submitTime
+        );
+        return currentDate > latestDate ? current : latest;
+      });
+      chassisToReallocatedTo.set(
+        chassisNumber,
+        entries[latestEntryId].reallocatedTo
+      );
+    }
   });
 
-  const exportExcel = async () => {
-    try {
-      const XLSX = await loadXLSX();
-      const active = activeRows.map(toPlainRow);
-      const onhold = onHoldRows.map(toPlainRow);
+  Object.entries(dispatchData).forEach(([chassisNo, entry]) => {
+    const reallocatedTo = chassisToReallocatedTo.get(chassisNo);
+    const validatedDealerCheck = validateDealerCheck(
+      entry["SAP Data"],
+      entry["Scheduled Dealer"],
+      reallocatedTo
+    );
 
-      const wb = XLSX.utils.book_new();
-      const ws1 = XLSX.utils.json_to_sheet(active);
-      const ws2 = XLSX.utils.json_to_sheet(onhold);
-      XLSX.utils.book_append_sheet(wb, ws1, "Active");
-      XLSX.utils.book_append_sheet(wb, ws2, "On Hold");
+    processed.push({
+      ...entry,
+      DealerCheck: validatedDealerCheck,
+      ...(reallocatedTo && { reallocatedTo }),
+    });
+  });
 
-      const wbout = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-      downloadBlob(new Blob([wbout], { type: "application/octet-stream" }), `dispatch_${new Date().toISOString().slice(0,10)}.xlsx`);
-      toast.success("Excel 导出完成");
-    } catch {
-      const rowsToCsv = (rows: any[]) => {
-        if (!rows.length) return "";
-        const headers = Object.keys(rows[0]);
-        const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-        const lines = [headers.map(escape).join(",")];
-        for (const r of rows) lines.push(headers.map(h => escape(r[h])).join(","));
-        return lines.join("\n");
-      };
-      const active = activeRows.map(toPlainRow);
-      const onhold = onHoldRows.map(toPlainRow);
-      downloadBlob(new Blob([rowsToCsv(active)], { type: "text/csv;charset=utf-8" }), `dispatch_active_${new Date().toISOString().slice(0,10)}.csv`);
-      downloadBlob(new Blob([rowsToCsv(onhold)], { type: "text/csv;charset=utf-8" }), `dispatch_onhold_${new Date().toISOString().slice(0,10)}.csv`);
-      toast.message("Excel 依赖不可用，已回落为 CSV 导出");
-    }
-  };
+  return processed;
+};
 
-  const SortableHeader = ({ children, sortKey, className = "", align = "left" as "left" | "center" }: { children: React.ReactNode; sortKey: string; className?: string; align?: "left" | "center" }) => (
-    <TableHead
-      className={`cursor-pointer hover:bg-slate-50 transition-colors align-top ${CELL_VDIV} ${align === "center" ? "text-center" : ""} ${className}`}
-      onClick={() => handleSort(sortKey)}
-    >
-      <div className={`flex ${align === "center" ? "justify-center" : ""} items-center gap-1`}>
-        <span className="truncate font-medium text-slate-800">{children}</span>
-        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-      </div>
-    </TableHead>
-  );
-
-  // ✅ 迷你表头：每个车架号块上方都显示（淡色、对齐一致）
-  const MiniHeaderRow: React.FC = () => (
-    <TableRow className="bg-slate-50/80">
-      {/* 左侧色条占位 */}
-      <TableCell className="p-0" />
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Chassis</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 text-center ${CELL_VDIV}`}>GR Days</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Customer</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Model</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>SAP Data</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Scheduled Dealer</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Matched PO No</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Code</TableCell>
-      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 text-center ${CELL_VDIV}`}>On Hold</TableCell>
-    </TableRow>
-  );
-
+// Snowy Stock 判断
+const isSnowyStock = (
+  entry: ProcessedDispatchEntry,
+  chassisToReallocatedTo: Map<string, string>
+) => {
+  const reallocatedTo = chassisToReallocatedTo.get(entry["Chassis No"]);
+  if (reallocatedTo === "Snowy Stock") return true;
   return (
-    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
-      {/* 自然标题行（不吸附） */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-slate-900">Dispatch Data</h2>
-        <div className="flex items-center gap-3">
-          <Input
-            placeholder="Search chassis / dealer / PO / comment ..."
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-[280px]"
-          />
-          <Button variant="outline" className="shrink-0" onClick={exportExcel}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-        </div>
-      </div>
-
-      <Card className="w-full max-w-full">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm text-slate-600">Summary</CardTitle>
-        </CardHeader>
-
-        <CardContent className="p-0">
-          <div className="w-full max-w-full overflow-x-hidden">
-            <Table className="w-full table-fixed">
-              {/* 定宽列 */}
-              <colgroup>
-                {COLS.map((c) => (
-                  <col key={c.key} style={{ width: c.w === 8 ? "8px" : `${c.w}px` }} />
-                ))}
-              </colgroup>
-
-              {/* 总表头（仅页首出现，不吸附） */}
-              <TableHeader className="bg-slate-50 border-y border-slate-200">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="p-0" /> {/* 左色条占位 */}
-                  <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
-                  <SortableHeader sortKey="GR to GI Days" align="center">GR Days</SortableHeader>
-                  <SortableHeader sortKey="Customer">Customer</SortableHeader>
-                  <SortableHeader sortKey="Model">Model</SortableHeader>
-                  <SortableHeader sortKey="SAP Data">SAP Data</SortableHeader>
-                  <SortableHeader sortKey="Scheduled Dealer">Scheduled Dealer</SortableHeader>
-                  <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
-                  <SortableHeader sortKey="Code">Code</SortableHeader>
-                  <TableHead className={`text-center align-top pt-3 font-medium text-slate-800 ${CELL_VDIV}`}>
-                    On Hold
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {activeRows.map((entry, idx) => {
-                  const id = entry["Chassis No"];
-                  const barColor = getGRDaysColor(entry["GR to GI Days"] || 0);
-                  const barWidth = getGRDaysWidth(entry["GR to GI Days"] || 0, maxGRDays);
-                  const rowBg = idx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
-
-                  const commentValue = commentDraft[id] ?? (entry.Comment ?? "");
-                  const pickupLocal  = pickupDraft[id]  ?? (entry.EstimatedPickupAt ? isoToLocal(entry.EstimatedPickupAt) : "");
-
-                  return (
-                    <React.Fragment key={id}>
-                      {/* ✅ 每个车架号块的迷你表头（淡色） */}
-                      <MiniHeaderRow />
-
-                      {/* 第一行：关键信息 */}
-                      <TableRow className={`align-top ${rowBg}`}>
-                        {/* 左侧分组色条，rowSpan=2 */}
-                        <TableCell rowSpan={2} className="p-0">
-                          <div className="h-full w-1 bg-blue-500 rounded-l" />
-                        </TableCell>
-
-                        <TableCell className={`${CELL} ${CELL_VDIV} font-medium text-slate-900`} title={id}>
-                          {id}
-                        </TableCell>
-
-                        <TableCell className={`${CELL} ${CELL_VDIV} text-center`} title={String(entry["GR to GI Days"] ?? "-")}>
-                          <div className="inline-flex flex-col items-stretch w-full">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-slate-900">{entry["GR to GI Days"] ?? "-"}</span>
-                              <span className="text-slate-500">days</span>
-                            </div>
-                            <div className="w-full bg-slate-200 rounded-full h-1.5 mt-1">
-                              <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${barWidth}%` }} />
-                            </div>
-                          </div>
-                        </TableCell>
-
-                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry.Customer || ""}>{entry.Customer || "-"}</TableCell>
-                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry.Model || ""}>{entry.Model || "-"}</TableCell>
-                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry["SAP Data"] || ""}>{entry["SAP Data"] || "-"}</TableCell>
-                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry["Scheduled Dealer"] || ""}>{entry["Scheduled Dealer"] || "-"}</TableCell>
-                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry["Matched PO No"] || ""}>{entry["Matched PO No"] || "-"}</TableCell>
-                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry.Code || ""}>{entry.Code || "-"}</TableCell>
-
-                        <TableCell className={`${CELL_VDIV} text-center`}>
-                          <Button
-                            size="sm"
-                            className={entry.OnHold ? "bg-red-600 text-white" : "bg-amber-500 text-white"}
-                            disabled={saving[id]}
-                            onClick={() => handleToggleOnHold(entry, !entry.OnHold)}
-                          >
-                            {entry.OnHold ? "Cancel" : "On Hold"}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-
-                      {/* 第二行：编辑 & 扩展 */}
-                      <TableRow className={`${rowBg}`}>
-                        {/* 第二行合并 9 列（不含左条） */}
-                        <TableCell colSpan={9} className="border-b border-slate-200">
-                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 py-3 px-2">
-                            {/* Comment */}
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-slate-600 w-28 shrink-0">Comment</span>
-                              <Input
-                                className="w-full max-w-[320px]"
-                                placeholder="Add a comment"
-                                value={commentValue}
-                                onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
-                                onKeyDown={(e) => { if (e.key === "Enter") handleSaveComment(entry); }}
-                              />
-                              <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handleSaveComment(entry)}>
-                                Save
-                              </Button>
-                            </div>
-
-                            {/* Estimated pickup */}
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-slate-600 w-28 shrink-0">Pickup</span>
-                              <input
-                                type="datetime-local"
-                                className="px-2 py-1 border rounded w-full max-w-[260px]"
-                                min={minLocalNow}
-                                value={pickupLocal}
-                                onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
-                              />
-                              <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handleSavePickup(entry)}>
-                                Save
-                              </Button>
-                            </div>
-
-                            {/* Checks */}
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-[13px] text-slate-600 w-24 shrink-0">Checks</span>
-                              <span
-                                className={`px-2 py-1 rounded-full text-xs ${
-                                  entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                }`}
-                                title={`Status: ${entry.Statuscheck || "-"}`}
-                              >
-                                Status: {entry.Statuscheck || "-"}
-                              </span>
-                              <span
-                                className={`px-2 py-1 rounded-full text-xs ${
-                                  entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                }`}
-                                title={`Dealer: ${entry.DealerCheck || "-"}`}
-                              >
-                                Dealer: {entry.DealerCheck || "-"}
-                              </span>
-                            </div>
-
-                            {/* Reallocation（红） */}
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-slate-600 w-28 shrink-0">Reallocation</span>
-                              <span
-                                className={`px-2 py-1 rounded text-xs ${entry.reallocatedTo ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-500'}`}
-                                title={entry.reallocatedTo || "-"}
-                              >
-                                {entry.reallocatedTo || "-"}
-                              </span>
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-slate-600 w-20 shrink-0">Actions</span>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleReportError(id)}
-                                disabled={sendingEmail === id}
-                                className="inline-flex items-center gap-1 text-xs"
-                              >
-                                {sendingEmail === id ? (
-                                  <>
-                                    <Mail className="h-3 w-3 animate-pulse" />
-                                    <span className="hidden sm:inline">Sending...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <AlertTriangle className="h-3 w-3" />
-                                    <span className="hidden sm:inline">Report</span>
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-
-                      {/* 组间留白（柔和分隔） */}
-                      <TableRow>
-                        <TableCell colSpan={10} className="p-0">
-                          <div className="h-3" />
-                        </TableCell>
-                      </TableRow>
-                    </React.Fragment>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* On Hold 卡片 */}
-      <OnHoldBoard
-        rows={onHoldRows}
-        saving={saving}
-        error={error}
-        commentDraft={commentDraft}
-        pickupDraft={pickupDraft}
-        setCommentDraft={setCommentDraft}
-        setPickupDraft={setPickupDraft}
-        handlers={{ handleToggleOnHold, handleSaveComment, handleSavePickup }}
-      />
-    </div>
+    entry["Scheduled Dealer"] === "Snowy Stock" &&
+    entry.Statuscheck === "OK" &&
+    entry.DealerCheck === "OK" &&
+    (!reallocatedTo || reallocatedTo.trim() === "")
   );
 };
 
-/* ====================== On Hold 卡片 ====================== */
-const OnHoldBoard: React.FC<{
-  rows: ProcessedDispatchEntry[];
-  saving: Record<string, boolean>;
-  error: Record<string, string | undefined>;
-  commentDraft: Record<string, string>;
-  pickupDraft: Record<string, string>;
-  setCommentDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  setPickupDraft: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  handlers: {
-    handleToggleOnHold: (row: ProcessedDispatchEntry, next: boolean) => Promise<void>;
-    handleSaveComment: (row: ProcessedDispatchEntry) => Promise<void>;
-    handleSavePickup: (row: ProcessedDispatchEntry) => Promise<void>;
-  };
-}> = ({
-  rows, saving, error, commentDraft, pickupDraft, setCommentDraft, setPickupDraft, handlers
-}) => {
-  if (!rows.length) return null;
-  return (
-    <Card className="w-full max-w-full">
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-5 bg-red-600 rounded" />
-          <CardTitle className="text-base font-semibold text-slate-900">On Hold</CardTitle>
-          <div className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-            {rows.length} Items
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 items-stretch w-full max-w-full">
-          {rows.map((row, idx) => {
-            const id = row["Chassis No"];
-            const commentValue = commentDraft[id] ?? (row.Comment ?? "");
-            const pickupLocal  = pickupDraft[id]  ?? (row.EstimatedPickupAt ? new Date(row.EstimatedPickupAt).toISOString().slice(0,16) : "");
-            return (
-              <div key={id} className={`h-full min-h-[260px] flex flex-col rounded-lg border border-slate-200 p-4 ${idx % 2 ? "bg-white" : "bg-slate-50/50"}`}>
-                <div className="flex items-center justify-between gap-3 pb-2 border-b border-slate-200">
-                  <div className="font-medium text-sm text-slate-900 break-all">{id}</div>
-                  <Button
-                    size="sm"
-                    className="bg-red-600 text-white"
-                    disabled={saving[id]}
-                    onClick={() => handlers.handleToggleOnHold(row, false)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
+// 顶部统计
+export const getDispatchStats = (
+  dispatchData: DispatchData,
+  reallocationData: ReallocationData
+) => {
+  const entries = Object.values(dispatchData);
+  const total = entries.length;
+  const okStatus = entries.filter((e) => e.Statuscheck === "OK").length;
+  const invalidStock = entries.filter((e) => e.Statuscheck !== "OK").length;
 
-                <div className="mt-2 text-sm space-y-1.5 flex-1">
-                  <div className={CELL}><span className="text-slate-500">Customer：</span>{row.Customer || "-"}</div>
-                  <div className={CELL}><span className="text-slate-500">Model：</span>{row.Model || "-"}</div>
-                  <div className={CELL}><span className="text-slate-500">Code：</span>{row.Code || "-"}</div>
-                  <div className={CELL}><span className="text-slate-500">Matched PO：</span>{row["Matched PO No"] || "-"}</div>
-                </div>
-
-                <div className="mt-3 space-y-2 pt-2 border-t border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      className="w-full"
-                      placeholder="Add a comment"
-                      value={commentValue}
-                      onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") handlers.handleSaveComment(row); }}
-                    />
-                    <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handlers.handleSaveComment(row)}>
-                      Save
-                    </Button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="datetime-local"
-                      className="px-2 py-1 border rounded w-full"
-                      min={new Date().toISOString().slice(0,16)}
-                      value={pickupLocal}
-                      onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
-                    />
-                    <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handlers.handleSavePickup(row)}>
-                      Save
-                    </Button>
-                  </div>
-
-                  {error[id] && <div className="text-xs text-red-600">{error[id]}</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-/* ====================== ReallocationTable ====================== */
-interface ReallocationTableProps {
-  data: ProcessedReallocationEntry[];
-  searchTerm: string;
-  onSearchChange: (term: string) => void;
-  dispatchData: ProcessedDispatchEntry[];
-}
-
-export const ReallocationTable: React.FC<ReallocationTableProps> = ({
-  data, searchTerm, onSearchChange, dispatchData
-}) => {
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc'; } | null>(null);
-
-  const handleSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
-    setSortConfig({ key, direction });
-  };
-
-  const safeStringIncludes = (v: any, s: string) => v != null && String(v).toLowerCase().includes(s);
-
-  const filteredAndSortedData = useMemo(() => {
-    const s = (searchTerm || "").toLowerCase();
-    let filtered = s
-      ? data.filter(re =>
-          safeStringIncludes(re.chassisNumber, s) ||
-          safeStringIncludes(re.customer, s) ||
-          safeStringIncludes(re.model, s) ||
-          safeStringIncludes(re.originalDealer, s) ||
-          safeStringIncludes(re.reallocatedTo, s) ||
-          safeStringIncludes(re.regentProduction, s) ||
-          safeStringIncludes(re.issue?.type, s) ||
-          dispatchData.some(d => d["Chassis No"] === re.chassisNumber && (
-            safeStringIncludes(d["Scheduled Dealer"], s) || safeStringIncludes(d["SAP Data"], s)
-          ))
-        )
-      : data;
-
-    if (sortConfig) {
-      filtered = [...filtered].sort((a: any, b: any) => {
-        const aValue = (a as any)[sortConfig.key];
-        const bValue = (b as any)[sortConfig.key];
-        const aStr = String(aValue ?? '').toLowerCase();
-        const bStr = String(bValue ?? '').toLowerCase();
-        return sortConfig.direction === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+  const chassisToReallocatedTo = new Map<string, string>();
+  Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
+    const ids = Object.keys(entryObj);
+    if (ids.length > 0) {
+      const latestId = ids.reduce((latest, current) => {
+        const latestDate = parseDDMMYYYY(
+          entryObj[latest].date || entryObj[latest].submitTime
+        );
+        const currentDate = parseDDMMYYYY(
+          entryObj[current].date || entryObj[current].submitTime
+        );
+        return currentDate > latestDate ? current : latest;
       });
+      chassisToReallocatedTo.set(chassisNumber, entryObj[latestId].reallocatedTo);
     }
-    return filtered;
-  }, [data, dispatchData, searchTerm, sortConfig]);
+  });
 
-  const SortableHeader = ({ children, sortKey, className = "" }: { children: React.ReactNode; sortKey: string; className?: string }) => (
-    <TableHead className={`cursor-pointer hover:bg-slate-50 transition-colors ${CELL_VDIV} ${className}`} onClick={() => handleSort(sortKey)}>
-      <div className="flex items-center gap-1">
-        <span className="truncate font-medium text-slate-800">{children}</span>
-        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-      </div>
-    </TableHead>
-  );
+  const processedEntries = entries.map((e) => {
+    const reallocatedTo = chassisToReallocatedTo.get(e["Chassis No"]);
+    const validatedDealerCheck = validateDealerCheck(
+      e["SAP Data"],
+      e["Scheduled Dealer"],
+      reallocatedTo
+    );
+    return { ...e, DealerCheck: validatedDealerCheck, reallocatedTo };
+  });
 
-  return (
-    <Card className="w-full max-w-full">
-      <CardHeader className="pb-2">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-1.5 h-5 bg-purple-600 rounded" />
-            <CardTitle className="text-base font-semibold text-slate-900">Reallocation</CardTitle>
-            <div className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
-              {filteredAndSortedData.length} Items
-            </div>
-          </div>
-          <Input
-            placeholder="Search reallocations..."
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full sm:max-w-sm"
-          />
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <div className="w-full max-w-full overflow-x-hidden">
-          <Table className="w-full table-fixed">
-            <TableHeader className="bg-slate-50 border-y border-slate-200">
-              <TableRow>
-                <SortableHeader sortKey="chassisNumber">Chassis</SortableHeader>
-                <SortableHeader sortKey="customer">Customer</SortableHeader>
-                <SortableHeader sortKey="model">Model</SortableHeader>
-                <SortableHeader sortKey="originalDealer">Original Dealer</SortableHeader>
-                <SortableHeader sortKey="reallocatedTo">Reallocated To</SortableHeader>
-                <SortableHeader sortKey="regentProduction">Regent Production</SortableHeader>
-                <SortableHeader sortKey="issue">Issue</SortableHeader>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredAndSortedData.map((re, idx) => (
-                <TableRow key={`${re.chassisNumber}-${(re as any).entryId || re.submitTime || "row"}`} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
-                  <TableCell className={`${CELL} ${CELL_VDIV} font-medium text-slate-900`} title={re.chassisNumber}>{re.chassisNumber}</TableCell>
-                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.customer || ""}>{re.customer || "-"}</TableCell>
-                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.model || ""}>{re.model || "-"}</TableCell>
-                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.originalDealer || ""}>{re.originalDealer || "-"}</TableCell>
-                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.reallocatedTo || ""}>{re.reallocatedTo || "-"}</TableCell>
-                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.regentProduction || ""}>{re.regentProduction || "-"}</TableCell>
-                  <TableCell className={`${CELL}`} title={re.issue?.type || ""}>{re.issue?.type || "-"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
-  );
+  const snowyStock = processedEntries.filter((e) =>
+    isSnowyStock(e, chassisToReallocatedTo)
+  ).length;
+
+  const canBeDispatched = processedEntries.filter(
+    (e) => e.Statuscheck === "OK" && !isSnowyStock(e, chassisToReallocatedTo)
+  ).length;
+
+  return { total, okStatus, invalidStock, snowyStock, canBeDispatched };
 };
+
+// 过滤
+export const filterDispatchData = (
+  data: ProcessedDispatchEntry[],
+  filter: string,
+  reallocationData: ReallocationData
+): ProcessedDispatchEntry[] => {
+  if (filter === "all") return data;
+  if (filter === "ok") return data.filter((e) => e.Statuscheck === "OK");
+  if (filter === "invalid") return data.filter((e) => e.Statuscheck !== "OK");
+
+  const chassisToReallocatedTo = new Map<string, string>();
+  Object.entries(reallocationData).forEach(([chassisNumber, entryObj]) => {
+    const ids = Object.keys(entryObj);
+    if (ids.length > 0) {
+      const latestId = ids.reduce((latest, current) => {
+        const latestDate = parseDDMMYYYY(
+          entryObj[latest].date || entryObj[latest].submitTime
+        );
+        const currentDate = parseDDMMYYYY(
+          entryObj[current].date || entryObj[current].submitTime
+        );
+        return currentDate > latestDate ? current : latest;
+      });
+      chassisToReallocatedTo.set(chassisNumber, entryObj[latestId].reallocatedTo);
+    }
+  });
+
+  if (filter === "snowy")
+    return data.filter((e) => isSnowyStock(e, chassisToReallocatedTo));
+
+  if (filter === "canBeDispatched")
+    return data.filter(
+      (e) => e.Statuscheck === "OK" && !isSnowyStock(e, chassisToReallocatedTo)
+    );
+
+  return data;
+};
+
+// GR 天数条的样式工具（给 UI 用）
+export const getGRDaysColor = (days: number): string => {
+  if (days <= 7) return "bg-green-500";
+  if (days <= 14) return "bg-yellow-500";
+  if (days <= 30) return "bg-orange-500";
+  return "bg-red-500";
+};
+export const getGRDaysWidth = (days: number, maxDays: number): number =>
+  Math.min((days / Math.max(maxDays, 1)) * 100, 100);

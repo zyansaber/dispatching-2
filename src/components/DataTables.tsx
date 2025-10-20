@@ -21,7 +21,7 @@ try {
 /** 单元格：一行显示 + 溢出省略号（不再换行） */
 const CELL = "text-sm leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
 
-/** 列宽：减少首行列数，避免横向滚动 */
+/** 列宽：把 Status / Dealer 移到第二行，因此首行列更少，避免横向滚动 */
 const COLS = [
   { key: "__bar",            w: 8   }, // 左侧分组竖条
   { key: "Chassis No",       w: 150 },
@@ -33,8 +33,6 @@ const COLS = [
   { key: "Matched PO No",    w: 160 },
   { key: "Code",             w: 120 },
   { key: "On Hold",          w: 110 },
-  { key: "Statuscheck",      w: 110 },
-  { key: "DealerCheck",      w: 110 },
 ];
 
 /* ====================== 顶部统计卡片 ====================== */
@@ -336,8 +334,6 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
                   <SortableHeader sortKey="Code">Code</SortableHeader>
                   <TableHead className="text-center">On Hold</TableHead>
-                  <SortableHeader sortKey="Statuscheck" align="center">Status</SortableHeader>
-                  <SortableHeader sortKey="DealerCheck" align="center">Dealer</SortableHeader>
                 </TableRow>
               </TableHeader>
 
@@ -392,23 +388,12 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                             {entry.OnHold ? "Cancel" : "On Hold"}
                           </Button>
                         </TableCell>
-
-                        <TableCell className={`text-center ${CELL}`}>
-                          <span className={`px-2 py-1 rounded-full text-xs ${entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                            {entry.Statuscheck || "-"}
-                          </span>
-                        </TableCell>
-                        <TableCell className={`text-center ${CELL}`}>
-                          <span className={`px-2 py-1 rounded-full text-xs ${entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                            {entry.DealerCheck || "-"}
-                          </span>
-                        </TableCell>
                       </TableRow>
 
-                      {/* 第二行：编辑 & 扩展信息（含 Reallocation 和 Actions） */}
+                      {/* 第二行：编辑 & 扩展信息（含 Reallocation、Status/Dealer、Actions） */}
                       <TableRow className={`${zebra} ${groupShadow}`}>
-                        {/* 第二行占据首行剩余 12 列 */}
-                        <TableCell colSpan={12}>
+                        {/* 第二行占据首行剩余 9 列（不含最左边色条列） */}
+                        <TableCell colSpan={9}>
                           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 py-3">
                             {/* Comment */}
                             <div className="flex items-center gap-2 min-w-0">
@@ -432,7 +417,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                                 type="datetime-local"
                                 className="px-2 py-1 border rounded w-full max-w-[260px]"
                                 min={minLocalNow}
-                                value={pickupDraft[id] ?? (entry.EstimatedPickupAt ? isoToLocal(entry.EstimatedPickupAt) : "")}
+                                value={pickupLocal}
                                 onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
                               />
                               <Button size="sm" variant="secondary" disabled={saving[id]} onClick={() => handleSavePickup(entry)}>
@@ -440,7 +425,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </Button>
                             </div>
 
-                            {/* ✅ Reallocation（移到第二行） */}
+                            {/* Reallocation（第二行） */}
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="text-[13px] text-gray-500 w-32 shrink-0">Reallocation</span>
                               <div className={`${CELL} w-full`} title={entry.reallocatedTo || ""}>
@@ -448,30 +433,39 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </div>
                             </div>
 
-                            {/* ✅ Actions（移到第二行） */}
+                            {/* Status & Dealer（紧挨 Actions） */}
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="text-[13px] text-gray-500 w-20 shrink-0">Checks</span>
+                              <span className={`px-2 py-1 rounded-full text-xs ${entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`} title={`Status: ${entry.Statuscheck || "-"}`}>
+                                {entry.Statuscheck || "-"}
+                              </span>
+                              <span className={`px-2 py-1 rounded-full text-xs ${entry.DealerCheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`} title={`Dealer: ${entry.DealerCheck || "-"}`}>
+                                {entry.DealerCheck || "-"}
+                              </span>
+                            </div>
+
+                            {/* Actions（Report） */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-500 w-32 shrink-0">Actions</span>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleReportError(id)}
-                                  disabled={sendingEmail === id}
-                                  className="inline-flex items-center gap-1 text-xs"
-                                >
-                                  {sendingEmail === id ? (
-                                    <>
-                                      <Mail className="h-3 w-3 animate-pulse" />
-                                      <span className="hidden sm:inline">Sending...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <AlertTriangle className="h-3 w-3" />
-                                      <span className="hidden sm:inline">Report</span>
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
+                              <span className="text-[13px] text-gray-500 w-20 shrink-0">Actions</span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleReportError(id)}
+                                disabled={sendingEmail === id}
+                                className="inline-flex items-center gap-1 text-xs"
+                              >
+                                {sendingEmail === id ? (
+                                  <>
+                                    <Mail className="h-3 w-3 animate-pulse" />
+                                    <span className="hidden sm:inline">Sending...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <AlertTriangle className="h-3 w-3" />
+                                    <span className="hidden sm:inline">Report</span>
+                                  </>
+                                )}
+                              </Button>
                             </div>
                           </div>
 
@@ -479,10 +473,12 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* ✅ 组间粗分隔空白（不产生横向滚动） */}
+                      {/* 组间粗分隔空白（你也可以换成 2px 灰线） */}
                       <TableRow>
-                        <TableCell colSpan={13} className="p-0">
-                          <div className="h-6" /> {/* 6px 高度的空白区，你也可以换成 <div className='h-[2px] bg-gray-200'/> 粗线 */}
+                        <TableCell colSpan={10} className="p-0">
+                          <div className="h-6" />
+                          {/* 或者用线：
+                          <div className="h-[2px] bg-gray-200" /> */}
                         </TableCell>
                       </TableRow>
                     </React.Fragment>

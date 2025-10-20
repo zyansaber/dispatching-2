@@ -9,36 +9,31 @@ import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { toast } from "sonner";
 
-// 让 TS 认识全局 XLSX（CDN 动态注入）
-declare global {
-  interface Window { XLSX?: any }
-}
+// XLSX（CDN 注入）
+declare global { interface Window { XLSX?: any } }
 
-/** 单元格：一行显示 + 溢出省略号 */
+// 统一样式
 const CELL = "text-sm leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
+const CELL_VDIV = "border-r border-slate-200 last:border-r-0"; // 竖向浅分隔
 
-/** 首行列（精简，避免横向滚动） */
+// 列宽（避免左右滚动）
 const COLS = [
   { key: "__bar",            w: 8   },
-  { key: "Chassis No",       w: 150 },
+  { key: "Chassis No",       w: 160 },
   { key: "GR to GI Days",    w: 90  },
-  { key: "Customer",         w: 150 },
+  { key: "Customer",         w: 160 },
   { key: "Model",            w: 120 },
   { key: "SAP Data",         w: 170 },
   { key: "Scheduled Dealer", w: 170 },
-  { key: "Matched PO No",    w: 160 },
+  { key: "Matched PO No",    w: 170 },
   { key: "Code",             w: 120 },
   { key: "On Hold",          w: 110 },
 ];
 
-// 可选：无邮件模块也不报错
+// 邮件（可选）
 let sendReportEmail: (data: any) => Promise<boolean>;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  sendReportEmail = require("@/lib/emailjs").sendReportEmail;
-} catch {
-  sendReportEmail = async () => false;
-}
+try { sendReportEmail = require("@/lib/emailjs").sendReportEmail; }
+catch { sendReportEmail = async () => false; }
 
 /* ====================== 顶部统计卡片 ====================== */
 interface DispatchStatsProps {
@@ -57,11 +52,11 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   onFilterChange, activeFilter = "all"
 }) => {
   const cards = [
-    { label: "Total", value: total, filter: "all", color: "text-blue-600" },
-    { label: "Invalid", value: invalidStock, filter: "invalid", color: "text-red-600" },
-    { label: "Snowy Stock", value: snowyStock, filter: "snowy", color: "text-purple-600" },
-    { label: "Can Dispatch", value: canBeDispatched, filter: "canBeDispatched", color: "text-emerald-600" },
-    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold", color: "text-amber-600" } as const] : []),
+    { label: "Total", value: total, filter: "all" },
+    { label: "Invalid", value: invalidStock, filter: "invalid" },
+    { label: "Snowy Stock", value: snowyStock, filter: "snowy" },
+    { label: "Can Dispatch", value: canBeDispatched, filter: "canBeDispatched" },
+    ...(onHold !== undefined ? [{ label: "On Hold", value: onHold, filter: "onHold" } as const] : []),
   ] as const;
 
   return (
@@ -70,14 +65,14 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
         {cards.map((card) => (
           <Card
             key={card.filter}
-            className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === card.filter ? "ring-2 ring-blue-500" : ""}`}
+            className={`cursor-pointer transition hover:shadow-sm ${activeFilter === card.filter ? "ring-2 ring-blue-500" : ""}`}
             onClick={() => onFilterChange(card.filter as any)}
           >
             <CardHeader className="pb-2">
-              <CardTitle className="text-[13px] font-medium text-gray-600 truncate">{card.label}</CardTitle>
+              <CardTitle className="text-[13px] font-medium text-slate-600 truncate">{card.label}</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className={`text-2xl font-semibold ${card.color}`}>{card.value}</div>
+              <div className="text-2xl font-semibold text-slate-900">{card.value}</div>
             </CardContent>
           </Card>
         ))}
@@ -86,7 +81,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== 主表：两行一组 + 左侧色条 + 组间分隔 ====================== */
+/* ====================== 主表 ====================== */
 interface DispatchTableProps {
   allData: ProcessedDispatchEntry[];
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
@@ -101,11 +96,11 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc'; } | null>(null);
   const [sendingEmail, setSendingEmail] = useState<string | null>(null);
 
-  // 行内编辑状态
+  // 行内编辑
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
   const [pickupDraft, setPickupDraft]   = useState<Record<string, string>>({});
 
-  // 乐观更新
+  // 乐观
   const [optimistic, setOptimistic]     = useState<Record<string, Partial<ProcessedDispatchEntry>>>({});
   const [saving, setSaving]             = useState<Record<string, boolean>>({});
   const [error, setError]               = useState<Record<string, string | undefined>>({});
@@ -196,7 +191,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
   const maxGRDays = Math.max(...baseMerged.map(e => e["GR to GI Days"] || 0), 1);
 
-  // 日期工具
+  // 日期
   const isoToLocal = (iso?: string | null) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -210,7 +205,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     return `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
   }, []);
 
-  // 写库（乐观 + 回滚）
+  // 乐观写库
   const applyOptimistic = (id: string, patch: Partial<ProcessedDispatchEntry>) =>
     setOptimistic((m) => ({ ...m, [id]: { ...(m[id] || {}), ...patch } }));
 
@@ -291,7 +286,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     }
   };
 
-  // ===== 导出（CDN 版 xlsx 优先，失败回落 CSV） =====
+  // 导出
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -363,22 +358,39 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   };
 
   const SortableHeader = ({ children, sortKey, className = "", align = "left" as "left" | "center" }: { children: React.ReactNode; sortKey: string; className?: string; align?: "left" | "center" }) => (
-    <TableHead 
-      className={`cursor-pointer hover:bg-gray-50 transition-colors align-top ${align === "center" ? "text-center" : ""} ${className}`} 
+    <TableHead
+      className={`cursor-pointer hover:bg-slate-50 transition-colors align-top ${CELL_VDIV} ${align === "center" ? "text-center" : ""} ${className}`}
       onClick={() => handleSort(sortKey)}
     >
       <div className={`flex ${align === "center" ? "justify-center" : ""} items-center gap-1`}>
-        <span className="truncate font-semibold text-gray-700">{children}</span>
-        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+        <span className="truncate font-medium text-slate-800">{children}</span>
+        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
       </div>
     </TableHead>
   );
 
+  // ✅ 迷你表头：每个车架号块上方都显示（淡色、对齐一致）
+  const MiniHeaderRow: React.FC = () => (
+    <TableRow className="bg-slate-50/80">
+      {/* 左侧色条占位 */}
+      <TableCell className="p-0" />
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Chassis</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 text-center ${CELL_VDIV}`}>GR Days</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Customer</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Model</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>SAP Data</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Scheduled Dealer</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Matched PO No</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 ${CELL_VDIV}`}>Code</TableCell>
+      <TableCell className={`py-2 text-[11px] font-medium text-slate-500 text-center ${CELL_VDIV}`}>On Hold</TableCell>
+    </TableRow>
+  );
+
   return (
-    <div className="space-y-8 w-full max-w-full overflow-x-hidden">
-      {/* ✅ 非吸顶：仅一个自然标题，不会重叠 */}
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
+      {/* 自然标题行（不吸附） */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold tracking-tight">Dispatch Data</h2>
+        <h2 className="text-xl font-semibold text-slate-900">Dispatch Data</h2>
         <div className="flex items-center gap-3">
           <Input
             placeholder="Search chassis / dealer / PO / comment ..."
@@ -393,26 +405,25 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </div>
       </div>
 
-      {/* 主表（无任何 sticky） */}
       <Card className="w-full max-w-full">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm text-gray-600">Summary</CardTitle>
+          <CardTitle className="text-sm text-slate-600">Summary</CardTitle>
         </CardHeader>
 
         <CardContent className="p-0">
           <div className="w-full max-w-full overflow-x-hidden">
             <Table className="w-full table-fixed">
-              {/* 定宽列，保证行内不换行 + 水平齐整 */}
+              {/* 定宽列 */}
               <colgroup>
                 {COLS.map((c) => (
                   <col key={c.key} style={{ width: c.w === 8 ? "8px" : `${c.w}px` }} />
                 ))}
               </colgroup>
 
-              {/* ⚠️ 不再使用粘顶表头 */}
-              <TableHeader className="bg-gray-50 border-b">
-                <TableRow>
-                  <TableHead className="p-0" />
+              {/* 总表头（仅页首出现，不吸附） */}
+              <TableHeader className="bg-slate-50 border-y border-slate-200">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="p-0" /> {/* 左色条占位 */}
                   <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
                   <SortableHeader sortKey="GR to GI Days" align="center">GR Days</SortableHeader>
                   <SortableHeader sortKey="Customer">Customer</SortableHeader>
@@ -421,7 +432,9 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   <SortableHeader sortKey="Scheduled Dealer">Scheduled Dealer</SortableHeader>
                   <SortableHeader sortKey="Matched PO No">Matched PO No</SortableHeader>
                   <SortableHeader sortKey="Code">Code</SortableHeader>
-                  <TableHead className="text-center align-top pt-3 font-semibold text-gray-700">On Hold</TableHead>
+                  <TableHead className={`text-center align-top pt-3 font-medium text-slate-800 ${CELL_VDIV}`}>
+                    On Hold
+                  </TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -430,43 +443,47 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                   const id = entry["Chassis No"];
                   const barColor = getGRDaysColor(entry["GR to GI Days"] || 0);
                   const barWidth = getGRDaysWidth(entry["GR to GI Days"] || 0, maxGRDays);
-                  const zebra = idx % 2 === 0 ? "bg-white" : "bg-gray-50";
-                  const groupShadow = "shadow-[0_0_0_1px_rgba(0,0,0,0.04)]";
+                  const rowBg = idx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
 
                   const commentValue = commentDraft[id] ?? (entry.Comment ?? "");
                   const pickupLocal  = pickupDraft[id]  ?? (entry.EstimatedPickupAt ? isoToLocal(entry.EstimatedPickupAt) : "");
 
                   return (
                     <React.Fragment key={id}>
+                      {/* ✅ 每个车架号块的迷你表头（淡色） */}
+                      <MiniHeaderRow />
+
                       {/* 第一行：关键信息 */}
-                      <TableRow className={`align-top ${zebra} ${groupShadow}`}>
+                      <TableRow className={`align-top ${rowBg}`}>
                         {/* 左侧分组色条，rowSpan=2 */}
                         <TableCell rowSpan={2} className="p-0">
-                          <div className="h-full w-1 rounded-l-md bg-blue-500" />
+                          <div className="h-full w-1 bg-blue-500 rounded-l" />
                         </TableCell>
 
-                        <TableCell className={`font-semibold text-gray-900 ${CELL}`} title={id}>{id}</TableCell>
+                        <TableCell className={`${CELL} ${CELL_VDIV} font-medium text-slate-900`} title={id}>
+                          {id}
+                        </TableCell>
 
-                        <TableCell className={`text-center ${CELL}`} title={String(entry["GR to GI Days"] ?? "-")}>
+                        <TableCell className={`${CELL} ${CELL_VDIV} text-center`} title={String(entry["GR to GI Days"] ?? "-")}>
                           <div className="inline-flex flex-col items-stretch w-full">
                             <div className="flex justify-between text-xs">
-                              <span className="text-gray-900">{entry["GR to GI Days"] ?? "-"}</span>
-                              <span className="text-gray-500">days</span>
+                              <span className="text-slate-900">{entry["GR to GI Days"] ?? "-"}</span>
+                              <span className="text-slate-500">days</span>
                             </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-                              <div className={`h-2 rounded-full ${barColor}`} style={{ width: `${barWidth}%` }} />
+                            <div className="w-full bg-slate-200 rounded-full h-1.5 mt-1">
+                              <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${barWidth}%` }} />
                             </div>
                           </div>
                         </TableCell>
 
-                        <TableCell className={CELL} title={entry.Customer || ""}>{entry.Customer || "-"}</TableCell>
-                        <TableCell className={CELL} title={entry.Model || ""}>{entry.Model || "-"}</TableCell>
-                        <TableCell className={CELL} title={entry["SAP Data"] || ""}>{entry["SAP Data"] || "-"}</TableCell>
-                        <TableCell className={CELL} title={entry["Scheduled Dealer"] || ""}>{entry["Scheduled Dealer"] || "-"}</TableCell>
-                        <TableCell className={CELL} title={entry["Matched PO No"] || ""}>{entry["Matched PO No"] || "-"}</TableCell>
-                        <TableCell className={CELL} title={entry.Code || ""}>{entry.Code || "-"}</TableCell>
+                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry.Customer || ""}>{entry.Customer || "-"}</TableCell>
+                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry.Model || ""}>{entry.Model || "-"}</TableCell>
+                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry["SAP Data"] || ""}>{entry["SAP Data"] || "-"}</TableCell>
+                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry["Scheduled Dealer"] || ""}>{entry["Scheduled Dealer"] || "-"}</TableCell>
+                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry["Matched PO No"] || ""}>{entry["Matched PO No"] || "-"}</TableCell>
+                        <TableCell className={`${CELL} ${CELL_VDIV}`} title={entry.Code || ""}>{entry.Code || "-"}</TableCell>
 
-                        <TableCell className="text-center">
+                        <TableCell className={`${CELL_VDIV} text-center`}>
                           <Button
                             size="sm"
                             className={entry.OnHold ? "bg-red-600 text-white" : "bg-amber-500 text-white"}
@@ -478,13 +495,14 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                         </TableCell>
                       </TableRow>
 
-                      {/* 第二行：编辑 & 扩展（Checks + Reallocation 红、Actions） */}
-                      <TableRow className={`${zebra} ${groupShadow}`}>
-                        <TableCell colSpan={9}>
-                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 py-4 px-2">
+                      {/* 第二行：编辑 & 扩展 */}
+                      <TableRow className={`${rowBg}`}>
+                        {/* 第二行合并 9 列（不含左条） */}
+                        <TableCell colSpan={9} className="border-b border-slate-200">
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 py-3 px-2">
                             {/* Comment */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-600 w-28 shrink-0">Comment</span>
+                              <span className="text-[13px] text-slate-600 w-28 shrink-0">Comment</span>
                               <Input
                                 className="w-full max-w-[320px]"
                                 placeholder="Add a comment"
@@ -499,7 +517,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
                             {/* Estimated pickup */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-600 w-28 shrink-0">Pickup</span>
+                              <span className="text-[13px] text-slate-600 w-28 shrink-0">Pickup</span>
                               <input
                                 type="datetime-local"
                                 className="px-2 py-1 border rounded w-full max-w-[260px]"
@@ -514,7 +532,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
 
                             {/* Checks */}
                             <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-[13px] text-gray-600 w-24 shrink-0">Checks</span>
+                              <span className="text-[13px] text-slate-600 w-24 shrink-0">Checks</span>
                               <span
                                 className={`px-2 py-1 rounded-full text-xs ${
                                   entry.Statuscheck === 'OK' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -533,20 +551,20 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </span>
                             </div>
 
-                            {/* ✅ Reallocation（红色高亮） */}
+                            {/* Reallocation（红） */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-600 w-28 shrink-0">Reallocation</span>
+                              <span className="text-[13px] text-slate-600 w-28 shrink-0">Reallocation</span>
                               <span
-                                className={`px-2 py-1 rounded text-xs ${entry.reallocatedTo ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-500'}`}
+                                className={`px-2 py-1 rounded text-xs ${entry.reallocatedTo ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-500'}`}
                                 title={entry.reallocatedTo || "-"}
                               >
                                 {entry.reallocatedTo || "-"}
                               </span>
                             </div>
 
-                            {/* Actions（Report） */}
+                            {/* Actions */}
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] text-gray-600 w-20 shrink-0">Actions</span>
+                              <span className="text-[13px] text-slate-600 w-20 shrink-0">Actions</span>
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -568,15 +586,13 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
                               </Button>
                             </div>
                           </div>
-
-                          {error[id] && <div className="text-xs text-red-600 mt-1">{error[id]}</div>}
                         </TableCell>
                       </TableRow>
 
-                      {/* 组间分隔 */}
+                      {/* 组间留白（柔和分隔） */}
                       <TableRow>
                         <TableCell colSpan={10} className="p-0">
-                          <div className="h-5" />
+                          <div className="h-3" />
                         </TableCell>
                       </TableRow>
                     </React.Fragment>
@@ -588,7 +604,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 卡片区（自带标题；非吸顶） */}
+      {/* On Hold 卡片 */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}
@@ -623,11 +639,11 @@ const OnHoldBoard: React.FC<{
   if (!rows.length) return null;
   return (
     <Card className="w-full max-w-full">
-      <CardHeader>
+      <CardHeader className="pb-2">
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-6 bg-red-600 rounded-full" />
-          <CardTitle className="text-lg font-semibold tracking-tight">On Hold</CardTitle>
-          <div className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-semibold rounded-full">
+          <div className="w-1.5 h-5 bg-red-600 rounded" />
+          <CardTitle className="text-base font-semibold text-slate-900">On Hold</CardTitle>
+          <div className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
             {rows.length} Items
           </div>
         </div>
@@ -639,9 +655,9 @@ const OnHoldBoard: React.FC<{
             const commentValue = commentDraft[id] ?? (row.Comment ?? "");
             const pickupLocal  = pickupDraft[id]  ?? (row.EstimatedPickupAt ? new Date(row.EstimatedPickupAt).toISOString().slice(0,16) : "");
             return (
-              <div key={id} className={`h-full min-h-[280px] flex flex-col rounded-xl border p-4 shadow-sm ${idx % 2 ? "bg-gray-50" : "bg-white"}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium text-sm break-words break-all hyphens-auto">{id}</div>
+              <div key={id} className={`h-full min-h-[260px] flex flex-col rounded-lg border border-slate-200 p-4 ${idx % 2 ? "bg-white" : "bg-slate-50/50"}`}>
+                <div className="flex items-center justify-between gap-3 pb-2 border-b border-slate-200">
+                  <div className="font-medium text-sm text-slate-900 break-all">{id}</div>
                   <Button
                     size="sm"
                     className="bg-red-600 text-white"
@@ -652,17 +668,17 @@ const OnHoldBoard: React.FC<{
                   </Button>
                 </div>
 
-                <div className="mt-2 text-sm space-y-1 flex-1 min-h-[120px]">
-                  <div className={CELL}><span className="text-gray-500">Customer：</span>{row.Customer || "-"}</div>
-                  <div className={CELL}><span className="text-gray-500">Model：</span>{row.Model || "-"}</div>
-                  <div className={CELL}><span className="text-gray-500">Code：</span>{row.Code || "-"}</div>
-                  <div className={CELL}><span className="text-gray-500">Matched PO：</span>{row["Matched PO No"] || "-"}</div>
+                <div className="mt-2 text-sm space-y-1.5 flex-1">
+                  <div className={CELL}><span className="text-slate-500">Customer：</span>{row.Customer || "-"}</div>
+                  <div className={CELL}><span className="text-slate-500">Model：</span>{row.Model || "-"}</div>
+                  <div className={CELL}><span className="text-slate-500">Code：</span>{row.Code || "-"}</div>
+                  <div className={CELL}><span className="text-slate-500">Matched PO：</span>{row["Matched PO No"] || "-"}</div>
                 </div>
 
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center gap-2 min-w-0">
+                <div className="mt-3 space-y-2 pt-2 border-t border-slate-200">
+                  <div className="flex items-center gap-2">
                     <Input
-                      className="w-full max-w-[320px]"
+                      className="w-full"
                       placeholder="Add a comment"
                       value={commentValue}
                       onChange={(e) => setCommentDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -673,10 +689,10 @@ const OnHoldBoard: React.FC<{
                     </Button>
                   </div>
 
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-2">
                     <input
                       type="datetime-local"
-                      className="px-2 py-1 border rounded w-full max-w-[260px]"
+                      className="px-2 py-1 border rounded w-full"
                       min={new Date().toISOString().slice(0,16)}
                       value={pickupLocal}
                       onChange={(e) => setPickupDraft((m) => ({ ...m, [id]: e.target.value }))}
@@ -697,7 +713,7 @@ const OnHoldBoard: React.FC<{
   );
 };
 
-/* ====================== ReallocationTable（保持接口；默认你控制显示/隐藏） ====================== */
+/* ====================== ReallocationTable ====================== */
 interface ReallocationTableProps {
   data: ProcessedReallocationEntry[];
   searchTerm: string;
@@ -748,22 +764,22 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
   }, [data, dispatchData, searchTerm, sortConfig]);
 
   const SortableHeader = ({ children, sortKey, className = "" }: { children: React.ReactNode; sortKey: string; className?: string }) => (
-    <TableHead className={`cursor-pointer hover:bg-purple-50 transition-colors ${className}`} onClick={() => handleSort(sortKey)}>
+    <TableHead className={`cursor-pointer hover:bg-slate-50 transition-colors ${CELL_VDIV} ${className}`} onClick={() => handleSort(sortKey)}>
       <div className="flex items-center gap-1">
-        <span className="truncate font-semibold text-gray-700">{children}</span>
-        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+        <span className="truncate font-medium text-slate-800">{children}</span>
+        <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
       </div>
     </TableHead>
   );
 
   return (
     <Card className="w-full max-w-full">
-      <CardHeader>
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+      <CardHeader className="pb-2">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-1.5 h-6 bg-purple-600 rounded-full" />
-            <CardTitle className="text-lg font-bold">Reallocation</CardTitle>
-            <div className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
+            <div className="w-1.5 h-5 bg-purple-600 rounded" />
+            <CardTitle className="text-base font-semibold text-slate-900">Reallocation</CardTitle>
+            <div className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
               {filteredAndSortedData.length} Items
             </div>
           </div>
@@ -778,7 +794,7 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
       <CardContent className="p-0">
         <div className="w-full max-w-full overflow-x-hidden">
           <Table className="w-full table-fixed">
-            <TableHeader className="bg-gray-50 border-b">
+            <TableHeader className="bg-slate-50 border-y border-slate-200">
               <TableRow>
                 <SortableHeader sortKey="chassisNumber">Chassis</SortableHeader>
                 <SortableHeader sortKey="customer">Customer</SortableHeader>
@@ -790,15 +806,15 @@ export const ReallocationTable: React.FC<ReallocationTableProps> = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredAndSortedData.map((re) => (
-                <TableRow key={`${re.chassisNumber}-${(re as any).entryId || re.submitTime || "row"}`}>
-                  <TableCell className={`font-semibold text-gray-900 ${CELL}`} title={re.chassisNumber}>{re.chassisNumber}</TableCell>
-                  <TableCell className={CELL} title={re.customer || ""}>{re.customer || "-"}</TableCell>
-                  <TableCell className={CELL} title={re.model || ""}>{re.model || "-"}</TableCell>
-                  <TableCell className={CELL} title={re.originalDealer || ""}>{re.originalDealer || "-"}</TableCell>
-                  <TableCell className={CELL} title={re.reallocatedTo || ""}>{re.reallocatedTo || "-"}</TableCell>
-                  <TableCell className={CELL} title={re.regentProduction || ""}>{re.regentProduction || "-"}</TableCell>
-                  <TableCell className={CELL} title={re.issue?.type || ""}>{re.issue?.type || "-"}</TableCell>
+              {filteredAndSortedData.map((re, idx) => (
+                <TableRow key={`${re.chassisNumber}-${(re as any).entryId || re.submitTime || "row"}`} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
+                  <TableCell className={`${CELL} ${CELL_VDIV} font-medium text-slate-900`} title={re.chassisNumber}>{re.chassisNumber}</TableCell>
+                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.customer || ""}>{re.customer || "-"}</TableCell>
+                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.model || ""}>{re.model || "-"}</TableCell>
+                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.originalDealer || ""}>{re.originalDealer || "-"}</TableCell>
+                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.reallocatedTo || ""}>{re.reallocatedTo || "-"}</TableCell>
+                  <TableCell className={`${CELL} ${CELL_VDIV}`} title={re.regentProduction || ""}>{re.regentProduction || "-"}</TableCell>
+                  <TableCell className={`${CELL}`} title={re.issue?.type || ""}>{re.issue?.type || "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

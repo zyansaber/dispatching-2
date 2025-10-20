@@ -9,6 +9,12 @@ import { ProcessedDispatchEntry, ProcessedReallocationEntry } from "@/types";
 import { getGRDaysColor, getGRDaysWidth, reportError, patchDispatch } from "@/lib/firebase";
 import { toast } from "sonner";
 
+// ============ 关键：统一吸顶偏移（单位 px）================
+// 如果你的页面最顶部还有全局导航栏（例：56px），把它加进来：比如 56 + 48 = 104
+const STICKY_TOP_OFFSET = 0;    // 页面最顶部的全局导航高度（没有就 0）
+const TITLE_BAR_HEIGHT  = 56;   // 我们自带的工具栏高度
+const TABLE_HEADER_TOP  = STICKY_TOP_OFFSET + TITLE_BAR_HEIGHT;
+
 // 让 TS 认识全局 XLSX（CDN 动态注入）
 declare global {
   interface Window { XLSX?: any }
@@ -40,7 +46,7 @@ try {
   sendReportEmail = async () => false;
 }
 
-/* ====================== 顶部统计卡片 ====================== */
+/* ====================== 顶部统计卡片（保持不变） ====================== */
 interface DispatchStatsProps {
   total: number;
   invalidStock: number;
@@ -86,7 +92,7 @@ export const DispatchStats: React.FC<DispatchStatsProps> = ({
   );
 };
 
-/* ====================== 主表：两行一组 + 左侧色条 + 组间分隔 ====================== */
+/* ====================== 主表 ====================== */
 interface DispatchTableProps {
   allData: ProcessedDispatchEntry[];
   activeFilter?: 'all' | 'invalid' | 'snowy' | 'canBeDispatched' | 'onHold';
@@ -373,40 +379,50 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
   );
 
   return (
-    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
-      {/* 主表 */}
-      <Card className="w-full max-w-full">
-        {/* 吸顶标题 */}
-        <CardHeader className="sticky top-0 z-20 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <CardTitle className="text-lg font-semibold tracking-tight">Dispatch Data</CardTitle>
-            <div className="flex items-center gap-2 w-full md:w-auto">
-              <Input
-                placeholder="Search chassis / dealer / PO / comment ..."
-                value={searchTerm}
-                onChange={(e) => onSearchChange(e.target.value)}
-                className="w-full md:max-w-sm"
-              />
-              <Button variant="outline" className="shrink-0" onClick={exportExcel}>
-                <Download className="h-4 w-4 mr-1" />
-                Export
-              </Button>
-            </div>
+    <div className="space-y-4 w-full max-w-full">
+      {/* ✅ 页面级吸顶工具栏（标题 + 搜索 + 导出） */}
+      <div
+        className="sticky z-40 border-b bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70"
+        style={{ top: STICKY_TOP_OFFSET, height: TITLE_BAR_HEIGHT }}
+      >
+        <div className="h-full max-w-full px-4 flex items-center justify-between gap-3">
+          <span className="text-base font-semibold tracking-tight">Dispatch Data</span>
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="Search chassis / dealer / PO / comment ..."
+              value={searchTerm}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="w-[280px]"
+            />
+            <Button variant="outline" className="shrink-0" onClick={exportExcel}>
+              <Download className="h-4 w-4 mr-1" />
+              Export
+            </Button>
           </div>
+        </div>
+      </div>
+
+      {/* 主表（去掉原来的 CardHeader sticky，避免双 sticky 叠加错位） */}
+      <Card className="w-full max-w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm text-gray-600">Summary</CardTitle>
         </CardHeader>
 
         <CardContent className="p-0">
           <div className="w-full max-w-full overflow-x-hidden">
             <Table className="w-full table-fixed">
-              {/* 定宽列，保证行内不换行 + 水平齐整 */}
+              {/* 定宽列 */}
               <colgroup>
                 {COLS.map((c) => (
                   <col key={c.key} style={{ width: c.w === 8 ? "8px" : `${c.w}px` }} />
                 ))}
               </colgroup>
 
-              {/* ✅ 吸顶表头：随滚动固定在“Dispatch Data”标题之下 */}
-              <TableHeader className="sticky top-[60px] z-10 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b">
+              {/* ✅ 吸顶表头：固定在工具栏正下方 */}
+              <TableHeader
+                className="z-30 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b"
+                style={{ position: "sticky", top: TABLE_HEADER_TOP }}
+              >
                 <TableRow>
                   <TableHead className="p-0" />
                   <SortableHeader sortKey="Chassis No">Chassis</SortableHeader>
@@ -584,7 +600,7 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
         </CardContent>
       </Card>
 
-      {/* On Hold 卡片区 */}
+      {/* On Hold 卡片区（保持） */}
       <OnHoldBoard
         rows={onHoldRows}
         saving={saving}
@@ -687,7 +703,7 @@ const OnHoldBoard: React.FC<{
   );
 };
 
-/* ====================== ReallocationTable（保持原接口） ====================== */
+/* ====================== ReallocationTable ====================== */
 interface ReallocationTableProps {
   data: ProcessedReallocationEntry[];
   searchTerm: string;

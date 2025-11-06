@@ -10,14 +10,14 @@ const EMAILJS_CONFIG = {
 
 export interface EmailData {
   chassisNo: string;
-  sapData: string;
-  scheduledDealer: string;
-  reallocatedTo?: string;
-  customer: string;
-  model: string;
-  statusCheck: string;
-  dealerCheck: string;
-  grDays: number;
+  sapData?: string | null;
+  scheduledDealer?: string | null;
+  reallocatedTo?: string | null;
+  customer?: string | null;
+  model?: string | null;
+  statusCheck?: string | null;
+  dealerCheck?: string | null;
+  grDays?: number | null;
 }
 
 interface EmailTemplateParams {
@@ -36,57 +36,75 @@ interface EmailTemplateParams {
   from_name: string;
 }
 
+const safeText = (value: string | null | undefined, fallback: string) =>
+  (value && String(value).trim()) || fallback;
+
+const toSafeNumber = (value: number | string | null | undefined, fallback = 0) => {
+  const num = typeof value === 'string' ? Number(value) : value;
+  return Number.isFinite(num as number) ? (num as number) : fallback;
+};
+
 const buildTemplateParams = (data: EmailData): EmailTemplateParams => ({
   chassis_no: data.chassisNo,
-  sap_data: data.sapData || 'N/A',
-  scheduled_dealer: data.scheduledDealer || 'N/A',
-  reallocated_to: data.reallocatedTo || 'No Reallocation',
-  customer: data.customer || 'N/A',
-  model: data.model || 'N/A',
-  status_check: data.statusCheck,
-  dealer_check: data.dealerCheck,
-  gr_days: data.grDays,
+  sap_data: safeText(data.sapData, 'N/A'),
+  scheduled_dealer: safeText(data.scheduledDealer, 'N/A'),
+  reallocated_to: safeText(data.reallocatedTo, 'No Reallocation'),
+  customer: safeText(data.customer, 'N/A'),
+  model: safeText(data.model, 'N/A'),
+  status_check: safeText(data.statusCheck, 'Unknown'),
+  dealer_check: safeText(data.dealerCheck, 'Unknown'),
+  gr_days: toSafeNumber(data.grDays, 0),
   report_date: new Date().toLocaleString(),
   issue_summary: `Dealer Check Mismatch detected for chassis ${data.chassisNo}`,
   to_name: 'Dispatch Team',
   from_name: 'Dispatch Dashboard System'
 });
 
-const sendEmailRequest = async (templateParams: EmailTemplateParams): Promise<boolean> => {
+const readErrorMessage = async (response: Response) => {
+  const raw = await response.text();
+  if (!raw) return `${response.status} ${response.statusText}`.trim();
   try {
-    const response = await fetch(EMAILJS_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        service_id: EMAILJS_CONFIG.serviceId,
-        template_id: EMAILJS_CONFIG.templateId,
-        user_id: EMAILJS_CONFIG.publicKey,
-        accessToken: EMAILJS_CONFIG.privateKey,
-        template_params: templateParams
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`EmailJS request failed: ${response.status} ${errorText}`);
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.error === 'string') {
+      return parsed.error;
     }
+    if (typeof parsed?.message === 'string') {
+      return parsed.message;
+    }
+  } catch {
+    // ignore JSON parse errors and fall back to raw string
+  }
+  return raw;
+};
 
-    return true;
-  } catch (error) {
-    console.error('Failed to send email:', error);
-    return false;
+const sendEmailRequest = async (templateParams: EmailTemplateParams): Promise<void> => {
+  const response = await fetch(EMAILJS_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      service_id: EMAILJS_CONFIG.serviceId,
+      template_id: EMAILJS_CONFIG.templateId,
+      user_id: EMAILJS_CONFIG.publicKey,
+      accessToken: EMAILJS_CONFIG.privateKey,
+      template_params: templateParams
+    })
+  });
+
+  if (!response.ok) {
+    const message = await readErrorMessage(response);
+    throw new Error(message || 'EmailJS request failed');
   }
 };
 
-export const sendReportEmail = async (data: EmailData): Promise<boolean> => {
+export const sendReportEmail = async (data: EmailData): Promise<void> => {
   const templateParams = buildTemplateParams(data);
   console.log('Sending email with params:', templateParams);
-  return sendEmailRequest(templateParams);
+  await sendEmailRequest(templateParams);
 };
 
-export const testEmailConnection = async (): Promise<boolean> => {
+export const testEmailConnection = async (): Promise<void> => {
   const testParams: EmailTemplateParams = {
     chassis_no: 'TEST-001',
     sap_data: 'Test SAP Data',
@@ -103,5 +121,5 @@ export const testEmailConnection = async (): Promise<boolean> => {
     from_name: 'Dispatch Dashboard System'
   };
 
-  return sendEmailRequest(testParams);
+  await sendEmailRequest(testParams);
 };

@@ -31,9 +31,14 @@ const COLS = [
 ];
 
 // 邮件（可选）
-let sendReportEmail: (data: any) => Promise<boolean>;
-try { sendReportEmail = require("@/lib/emailjs").sendReportEmail; }
-catch { sendReportEmail = async () => false; }
+type EmailModule = typeof import("@/lib/emailjs");
+let emailModulePromise: Promise<EmailModule> | null = null;
+const loadEmailModule = () => {
+  if (!emailModulePromise) {
+    emailModulePromise = import("@/lib/emailjs");
+  }
+  return emailModulePromise;
+};
 
 /* ====================== 顶部统计卡片 ====================== */
 interface DispatchStatsProps {
@@ -270,17 +275,33 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
     if (!entry) return;
     setSendingEmail(chassisNo);
     try {
-      const ok = await sendReportEmail({
-        chassisNo: entry["Chassis No"],
-        sapData: entry["SAP Data"] || "N/A",
-        scheduledDealer: entry["Scheduled Dealer"] || "N/A",
-        reallocatedTo: entry.reallocatedTo || "No Reallocation",
-      });
-      if (ok) toast.success(`Report sent for ${chassisNo}.`);
-      else toast.error("Failed to send email report.");
-      await reportError(chassisNo, "Dealer check mismatch");
-    } catch {
-      toast.error("Failed to send report.");
+           const emailModule = await loadEmailModule();
+      try {
+        await emailModule.sendReportEmail({
+          chassisNo: entry["Chassis No"],
+          sapData: entry["SAP Data"],
+          scheduledDealer: entry["Scheduled Dealer"],
+          reallocatedTo: entry.reallocatedTo,
+          customer: entry.Customer,
+          model: entry.Model,
+          statusCheck: entry.Statuscheck,
+          dealerCheck: entry.DealerCheck,
+          grDays: entry["GR to GI Days"],
+        });
+        toast.success(`Report sent for ${chassisNo}.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : null;
+        toast.error(message ? `Failed to send email report: ${message}` : "Failed to send email report.");
+      }
+      try {
+        await reportError(chassisNo, "Dealer check mismatch");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : null;
+        toast.error(message ? `Failed to record report: ${message}` : "Failed to record report.");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : null;
+      toast.error(message ? `Failed to initialise email reporting: ${message}` : "Failed to send report.");
     } finally {
       setSendingEmail(null);
     }

@@ -6,6 +6,7 @@ import {
   get,
   push,
   update,
+  remove,
   onValue,
   off,
 } from "firebase/database";
@@ -63,6 +64,10 @@ export async function patchDispatchingNote(
   data: Partial<DispatchingNoteEntry>
 ) {
   await update(dispatchingNoteRef(chassisNo), data);
+}
+
+export async function deleteDispatchingNote(chassisNo: string) {
+  await remove(dispatchingNoteRef(chassisNo));
 }
 
 // DD/MM/YYYY 解析

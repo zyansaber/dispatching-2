@@ -1,9 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
@@ -30,6 +29,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
   const [drafts, setDrafts] = useState<Record<string, { update?: string; yearNotes?: string }>>({});
   const [hideDispatched, setHideDispatched] = useState(false);
   const [savingRow, setSavingRow] = useState<string | null>(null);
+  const saveTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
   const findLatestReallocatedDealer = (chassisNo: string) => {
     const entries = reallocations[chassisNo];
@@ -119,6 +119,12 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     ? processedRows.filter((row) => !row.dispatched)
     : processedRows;
 
+  useEffect(() => {
+    return () => {
+      Object.values(saveTimers.current).forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
+
   const handleAddChassis = async () => {
     const chassisNo = newChassis.trim();
     if (!chassisNo) return;
@@ -138,27 +144,28 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     }
   };
 
-  const handleSaveRow = async (rowId: string, chassisNo: string) => {
-    const draft = drafts[rowId];
-    const patch = {
-      update: draft?.update ?? notes[rowId]?.update ?? "",
-      yearNotes: draft?.yearNotes ?? notes[rowId]?.yearNotes ?? "",
-      updatedAt: new Date().toISOString(),
-    };
-    setSavingRow(rowId);
-    try {
-      await onSave(chassisNo, { chassisNo, ...patch });
-      setDrafts((prev) => {
-        const next = { ...prev };
-        delete next[rowId];
-        return next;
-      });
-      toast.success("Row saved");
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to save row");
-    } finally {
-      setSavingRow(null);
-    }
+  const queueSaveRow = (rowId: string, chassisNo: string, update?: string, yearNotes?: string) => {
+    const existing = saveTimers.current[rowId];
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(async () => {
+      setSavingRow(rowId);
+      try {
+        await onSave(chassisNo, {
+          chassisNo,
+          update: update ?? drafts[rowId]?.update ?? notes[rowId]?.update ?? "",
+          yearNotes: yearNotes ?? drafts[rowId]?.yearNotes ?? notes[rowId]?.yearNotes ?? "",
+          updatedAt: new Date().toISOString(),
+        });
+        toast.success("Saved");
+      } catch (error: any) {
+        toast.error(error?.message || "Failed to save row");
+      } finally {
+        setSavingRow(null);
+      }
+    }, 400);
+
+    saveTimers.current[rowId] = timer;
   };
 
   const toggleDispatched = async (rowId: string, chassisNo: string, dispatched: boolean) => {
@@ -207,18 +214,18 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="overflow-x-auto">
+      <CardContent className="overflow-visible">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead className="min-w-[170px]">Chassis No</TableHead>
-              <TableHead className="min-w-[140px]">Model</TableHead>
-              <TableHead className="min-w-[180px]">Scheduled Dealer</TableHead>
-              <TableHead className="min-w-[190px]">Latest Reallocation Dealer</TableHead>
-              <TableHead className="min-w-[170px]">Customer Name</TableHead>
-              <TableHead className="min-w-[220px]">Update</TableHead>
-              <TableHead className="min-w-[180px]">Year / Notes</TableHead>
-              <TableHead className="w-[120px] text-center">Dispatched</TableHead>
+              <TableHead className="min-w-[150px]">Chassis No</TableHead>
+              <TableHead className="min-w-[120px]">Model</TableHead>
+              <TableHead className="min-w-[160px]">Scheduled Dealer</TableHead>
+              <TableHead className="min-w-[170px]">Latest Reallocation Dealer</TableHead>
+              <TableHead className="min-w-[150px]">Customer Name</TableHead>
+              <TableHead className="min-w-[180px]">Update</TableHead>
+              <TableHead className="min-w-[160px]">Year / Notes</TableHead>
+              <TableHead className="w-[110px] text-center">Dispatched</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -249,33 +256,35 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                   <TableCell className="align-top text-slate-700">{row.reallocatedDealer || "-"}</TableCell>
                   <TableCell className="align-top text-slate-700">{row.customer || "-"}</TableCell>
                   <TableCell className="align-top">
-                    <Textarea
+                    <Input
                       value={updateValue}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const value = e.target.value;
                         setDrafts((prev) => ({
                           ...prev,
-                          [row.id]: { ...prev[row.id], update: e.target.value },
-                        }))
-                      }
+                          [row.id]: { ...prev[row.id], update: value },
+                        }));
+                        queueSaveRow(row.id, row.chassisNo, value, yearNotesValue);
+                      }}
                       placeholder="Notes / follow up"
-                      className="min-h-[90px]"
                     />
                   </TableCell>
                   <TableCell className="align-top">
-                    <Textarea
+                    <Input
                       value={yearNotesValue}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const value = e.target.value;
                         setDrafts((prev) => ({
                           ...prev,
-                          [row.id]: { ...prev[row.id], yearNotes: e.target.value },
-                        }))
-                      }
+                          [row.id]: { ...prev[row.id], yearNotes: value },
+                        }));
+                        queueSaveRow(row.id, row.chassisNo, updateValue, value);
+                      }}
                       placeholder="Year / other notes"
-                      className="min-h-[90px]"
                     />
                   </TableCell>
                   <TableCell className="align-top">
-                    <div className="flex flex-col gap-2 items-center">
+                    <div className="flex items-center justify-center">
                       <Button
                         size="sm"
                         variant={row.dispatched ? "default" : "outline"}
@@ -284,15 +293,6 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                         className="w-full"
                       >
                         {row.dispatched ? "Dispatched" : "Mark Dispatched"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => handleSaveRow(row.id, row.chassisNo)}
-                        disabled={isSaving}
-                        className="w-full"
-                      >
-                        Save
                       </Button>
                     </div>
                   </TableCell>

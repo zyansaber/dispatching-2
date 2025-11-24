@@ -62,23 +62,34 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     );
   };
 
-  const pickScheduleInfo = (chassisNo: string) => {
-    const match = schedule.find(
-      (item) => item.Chassis?.toLowerCase().trim() === chassisNo.toLowerCase().trim()
-    );
+  const scheduleLookup = useMemo(() => {
+    const map = new Map<string, { model?: string; scheduledDealer?: string; customerName?: string }>();
+    (schedule || []).forEach((item: any) => {
+      if (!item || typeof item !== "object") return;
+      const rawChassis =
+        item?.Chassis ||
+        item?.["Chassis No"] ||
+        item?.chassis ||
+        item?.chassisNo ||
+        item?.chassis_number;
+      const chassisKey = typeof rawChassis === "string" ? rawChassis.toLowerCase().trim() : "";
+      if (!chassisKey) return;
 
+      map.set(chassisKey, {
+        model: item?.Model || item?.model || "",
+        scheduledDealer: item?.Dealer || item?.dealer || item?.["Scheduled Dealer"] || "",
+        customerName: item?.Customer || item?.customer || item?.["Customer Name"] || "",
+      });
+    });
+    return map;
+  }, [schedule]);
+
+  const pickScheduleInfo = (chassisNo: string) => {
+    const info = scheduleLookup.get(chassisNo.toLowerCase().trim());
     return {
-      model: (match as any)?.Model || (match as any)?.model || "",
-      scheduledDealer:
-        (match as any)?.Dealer ||
-        (match as any)?.dealer ||
-        (match as any)?.["Scheduled Dealer"] ||
-        "",
-      customerName:
-        (match as any)?.Customer ||
-        (match as any)?.customer ||
-        (match as any)?.["Customer Name"] ||
-        "",
+      model: info?.model || "",
+      scheduledDealer: info?.scheduledDealer || "",
+      customerName: info?.customerName || "",
     };
   };
 

@@ -17,6 +17,7 @@ interface StockSheetTableProps {
   schedule: ScheduleData;
   reallocations: ReallocationData;
   onSave: (chassisNo: string, patch: Partial<DispatchingNoteEntry>) => Promise<void>;
+  onDelete: (chassisNo: string) => Promise<void>;
 }
 
 const StockSheetTable: React.FC<StockSheetTableProps> = ({
@@ -24,6 +25,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
   schedule,
   reallocations,
   onSave,
+  onDelete,
 }) => {
   const [newChassis, setNewChassis] = useState("");
   const [drafts, setDrafts] = useState<Record<string, { update?: string; yearNotes?: string }>>({});
@@ -168,6 +170,29 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     saveTimers.current[rowId] = timer;
   };
 
+  const handleDeleteRow = async (rowId: string, chassisNo: string) => {
+    const pendingTimer = saveTimers.current[rowId];
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      delete saveTimers.current[rowId];
+    }
+
+    setSavingRow(rowId);
+    try {
+      await onDelete(chassisNo);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+      toast.success("Row deleted");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to delete row");
+    } finally {
+      setSavingRow(null);
+    }
+  };
+
   const toggleDispatched = async (rowId: string, chassisNo: string, dispatched: boolean) => {
     setSavingRow(rowId);
     try {
@@ -176,7 +201,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
         dispatched,
         updatedAt: new Date().toISOString(),
       });
-      toast.success(dispatched ? "dispatched" : "pending");
+      toast.success(dispatched ? "Marked as dispatched" : "Marked as pending");
     } catch (error: any) {
       toast.error(error?.message || "Failed to update dispatched status");
     } finally {
@@ -218,6 +243,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
+              <TableHead className="w-10" aria-label="Delete" />
               <TableHead className="min-w-[150px]">Chassis No</TableHead>
               <TableHead className="min-w-[120px]">Model</TableHead>
               <TableHead className="min-w-[160px]">Scheduled Dealer</TableHead>
@@ -231,7 +257,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
           <TableBody>
             {visibleRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-sm text-slate-500 py-6">
+                <TableCell colSpan={9} className="text-center text-sm text-slate-500 py-6">
                   {hideDispatched ? "No pending records" : "No stock sheet records yet"}
                 </TableCell>
               </TableRow>
@@ -248,6 +274,18 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                   key={row.id}
                   className={`${row.dispatched ? "bg-emerald-50" : ""} transition`}
                 >
+                  <TableCell className="align-top">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-slate-500 hover:text-red-600"
+                      onClick={() => handleDeleteRow(row.id, row.chassisNo)}
+                      disabled={isSaving}
+                      aria-label="Delete row"
+                    >
+                      ×
+                    </Button>
+                  </TableCell>
                   <TableCell className="align-top font-semibold text-slate-800">
                     {row.chassisNo}
                   </TableCell>

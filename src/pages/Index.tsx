@@ -12,6 +12,7 @@ import {
   subscribeDispatchingNote,
   subscribeReallocation,
   patchDispatchingNote,
+  deleteDispatchingNote,
 } from "@/lib/firebase";
 import {
   DispatchData,
@@ -100,6 +101,12 @@ const IndexPage: React.FC = () => {
     await patchDispatchingNote(clean, { chassisNo: clean, ...patch });
   };
 
+  const handleDeleteDispatchingNote = async (chassisNo: string) => {
+    const clean = chassisNo.trim();
+    if (!clean) return;
+    await deleteDispatchingNote(clean);
+  };
+
   return (
     <div className="min-h-screen bg-white px-2 md:px-4 py-4 overflow-x-hidden">
       <div className="w-full space-y-6">
@@ -122,6 +129,7 @@ const IndexPage: React.FC = () => {
               schedule={schedule}
               reallocations={reallocRaw}
               onSave={handleSaveDispatchingNote}
+              onDelete={handleDeleteDispatchingNote}
             />
           </TabsContent>
 

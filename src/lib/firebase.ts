@@ -15,6 +15,8 @@ import {
   ScheduleData,
   ProcessedReallocationEntry,
   ProcessedDispatchEntry,
+  DispatchingNoteData,
+  DispatchingNoteEntry,
 } from "@/types";
 
 // -------------------- Firebase 初始化 --------------------
@@ -42,12 +44,25 @@ export function dispatchRef(chassisNo: string) {
   return ref(db, `Dispatch/${escapeKey(chassisNo)}`);
 }
 
+// /dispatchingnote/<Chassis No> 的引用
+export function dispatchingNoteRef(chassisNo: string) {
+  return ref(db, `dispatchingnote/${escapeKey(chassisNo)}`);
+}
+
 // 按底盘号进行“局部更新”
 export async function patchDispatch(
   chassisNo: string,
   data: Record<string, any>
 ) {
   await update(dispatchRef(chassisNo), data);
+}
+
+// 按底盘号进行“局部更新” dispatching note
+export async function patchDispatchingNote(
+  chassisNo: string,
+  data: Partial<DispatchingNoteEntry>
+) {
+  await update(dispatchingNoteRef(chassisNo), data);
 }
 
 // DD/MM/YYYY 解析
@@ -104,6 +119,16 @@ export const fetchScheduleData = async (): Promise<ScheduleData> => {
   }
 };
 
+export const fetchDispatchingNoteData = async (): Promise<DispatchingNoteData> => {
+  try {
+    const snapshot = await get(ref(db, "dispatchingnote"));
+    return snapshot.val() || {};
+  } catch (error) {
+    console.error("Error fetching dispatching note data:", error);
+    return {};
+  }
+};
+
 // -------------------- 实时订阅 --------------------
 export function subscribeDispatch(onChange: (data: DispatchData) => void) {
   const r = ref(db, "Dispatch");
@@ -115,6 +140,16 @@ export function subscribeReallocation(onChange: (data: ReallocationData) => void
   const r = ref(db, "reallocation");
   const cb = onValue(r, (snap) =>
     onChange((snap.val() || {}) as ReallocationData)
+  );
+  return () => off(r, "value", cb);
+}
+
+export function subscribeDispatchingNote(
+  onChange: (data: DispatchingNoteData) => void
+) {
+  const r = ref(db, "dispatchingnote");
+  const cb = onValue(r, (snap) =>
+    onChange((snap.val() || {}) as DispatchingNoteData)
   );
   return () => off(r, "value", cb);
 }

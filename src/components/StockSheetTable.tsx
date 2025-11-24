@@ -1,3 +1,4 @@
+
 import React, { useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -41,7 +42,8 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
       }
     >
   >({});
-  const [hideDispatched, setHideDispatched] = useState(false);
+  const [hideDispatched, setHideDispatched] = useState(true);
+  const [modelRangeFilter, setModelRangeFilter] = useState("");
   const [savingRow, setSavingRow] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -143,9 +145,13 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
       .sort((a, b) => a.chassisNo.localeCompare(b.chassisNo, undefined, { sensitivity: "base" }));
   }, [notes, schedule, reallocations]);
 
-  const visibleRows = hideDispatched
-    ? processedRows.filter((row) => !row.dispatched)
-    : processedRows;
+  const normalizedModelRange = modelRangeFilter.trim().toLowerCase();
+
+  const visibleRows = processedRows.filter((row) => {
+    if (hideDispatched && row.dispatched) return false;
+    if (!normalizedModelRange) return true;
+    return row.chassisNo.toLowerCase().slice(0, 3) === normalizedModelRange;
+  });
 
   const splitCsvLine = (line: string) => {
     const cells: string[] = [];
@@ -418,6 +424,12 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
             >
               {hideDispatched ? "Showing Pending" : "Hide Dispatched"}
             </Button>
+            <Input
+              placeholder="Model range (first 3 chars)"
+              value={modelRangeFilter}
+              onChange={(e) => setModelRangeFilter(e.target.value)}
+              className="w-56"
+            />
             <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
               {visibleRows.filter((r) => r.dispatched).length} dispatched / {processedRows.length} total
             </Badge>

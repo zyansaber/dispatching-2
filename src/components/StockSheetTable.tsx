@@ -31,6 +31,8 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
   const [drafts, setDrafts] = useState<Record<string, { update?: string; yearNotes?: string }>>({});
   const [hideDispatched, setHideDispatched] = useState(false);
   const [savingRow, setSavingRow] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const saveTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
   const findLatestReallocatedDealer = (chassisNo: string) => {
@@ -86,6 +88,17 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     return map;
   }, [schedule]);
 
+  const noteIndexByChassis = useMemo(() => {
+    const map = new Map<string, { id: string; entry: DispatchingNoteEntry }>();
+    Object.entries(notes || {}).forEach(([id, entry]) => {
+      const chassis = (entry?.chassisNo || id || "").toLowerCase().trim();
+      if (chassis) {
+        map.set(chassis, { id, entry });
+      }
+    });
+    return map;
+  }, [notes]);
+
   const pickScheduleInfo = (chassisNo: string) => {
     const info = scheduleLookup.get(chassisNo.toLowerCase().trim());
     return {
@@ -127,6 +140,84 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     };
   }, []);
 
+  const splitCsvLine = (line: string) => {
+    const cells: string[] = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === "\"") {
+        if (inQuotes && line[i + 1] === "\"") {
+          current += "\"";
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === "," && !inQuotes) {
+        cells.push(current.trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+
+    cells.push(current.trim());
+    return cells;
+  };
+
+  const normalizeHeaderKey = (header: string) => {
+    const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (["chassis", "chassisno", "chassisnumber"].includes(normalized)) return "chassisNo";
+    if (["update", "updates"].includes(normalized)) return "update";
+    if (["yearnotes", "year", "notes", "yearornotes", "yearothernotes"].includes(normalized)) return "yearNotes";
+    if (["dispatched", "status"].includes(normalized)) return "dispatched";
+    return "";
+  };
+
+  const parseUploadedTemplate = (text: string) => {
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) return [] as Array<Partial<DispatchingNoteEntry> & { chassisNo: string }>;
+
+    const headers = splitCsvLine(lines[0]).map(normalizeHeaderKey);
+    const entries: Array<Partial<DispatchingNoteEntry> & { chassisNo: string }> = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i]);
+      const record: Partial<DispatchingNoteEntry> & { chassisNo?: string } = {};
+
+      headers.forEach((headerKey, idx) => {
+        if (!headerKey) return;
+        const cell = cells[idx] ?? "";
+        if (headerKey === "dispatched") {
+          const normalized = cell.toLowerCase();
+          record.dispatched = ["true", "yes", "y", "1", "dispatched"].includes(normalized);
+        } else if (headerKey === "yearNotes") {
+          record.yearNotes = cell;
+        } else if (headerKey === "update") {
+          record.update = cell;
+        } else if (headerKey === "chassisNo") {
+          record.chassisNo = cell;
+        }
+      });
+
+      const chassisNo = (record.chassisNo || "").trim();
+      if (!chassisNo) continue;
+      entries.push({
+        chassisNo,
+        update: record.update ?? "",
+        yearNotes: record.yearNotes ?? "",
+        dispatched: record.dispatched,
+      });
+    }
+
+    return entries;
+  };
+
   const handleAddChassis = async () => {
     const chassisNo = newChassis.trim();
     if (!chassisNo) return;
@@ -143,6 +234,77 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
       toast.error(error?.message || "Failed to add chassis");
     } finally {
       setSavingRow(null);
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    const header = "Chassis No,Update,Year/Notes,Dispatched";
+    const sample = "ABC123456,Optional update,Optional year or other notes,false";
+    const content = `${header}\n${sample}`;
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "dispatchingnote_template.csv";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
+  const handleUploadTemplate = async (file: File) => {
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const entries = parseUploadedTemplate(text);
+      if (!entries.length) {
+        toast.error("No valid rows found in file");
+        return;
+      }
+
+      let success = 0;
+      let failed = 0;
+
+      for (const entry of entries) {
+        const chassisKey = entry.chassisNo.toLowerCase().trim();
+        const existing = noteIndexByChassis.get(chassisKey);
+        const patch: Partial<DispatchingNoteEntry> = {
+          chassisNo: entry.chassisNo.trim(),
+          update: entry.update,
+          yearNotes: entry.yearNotes,
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (typeof entry.dispatched === "boolean") {
+          patch.dispatched = entry.dispatched;
+        } else if (!existing) {
+          patch.dispatched = false;
+        }
+
+        if (!existing) {
+          patch.createdAt = new Date().toISOString();
+        }
+
+        try {
+          await onSave(entry.chassisNo, patch);
+          success += 1;
+        } catch (error) {
+          console.error(error);
+          failed += 1;
+        }
+      }
+
+      if (success) {
+        toast.success(`Imported ${success} row${success > 1 ? "s" : ""}`);
+      }
+      if (failed) {
+        toast.error(`${failed} row${failed > 1 ? "s" : ""} failed to import`);
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to import template");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
@@ -237,6 +399,28 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
           <Button onClick={handleAddChassis} disabled={!newChassis.trim() || savingRow === newChassis.trim()}>
             Add to Stock Sheet
           </Button>
+          <Button variant="outline" onClick={handleDownloadTemplate}>
+            Download Template
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+          >
+            {importing ? "Uploading..." : "Upload Template"}
+          </Button>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                handleUploadTemplate(file);
+              }
+            }}
+          />
         </div>
       </CardHeader>
       <CardContent className="overflow-visible">

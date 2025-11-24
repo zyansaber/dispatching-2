@@ -104,6 +104,10 @@ export interface DispatchingNoteEntry {
   update?: string;
   yearNotes?: string;
   dispatched?: boolean;
+  model?: string;
+  scheduledDealer?: string;
+  reallocatedDealer?: string;
+  customerName?: string;
   createdAt?: string;
   updatedAt?: string;
 }

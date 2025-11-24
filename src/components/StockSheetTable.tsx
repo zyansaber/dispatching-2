@@ -458,18 +458,34 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
         </div>
       </CardHeader>
       <CardContent className="overflow-visible">
-        <Table>
+        <Table className="text-sm">
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead className="w-16" aria-label="Row actions" />
-              <TableHead className="min-w-[150px]">Chassis No</TableHead>
-              <TableHead className="min-w-[120px]">Model</TableHead>
-              <TableHead className="min-w-[160px]">Scheduled Dealer</TableHead>
-              <TableHead className="min-w-[170px]">Latest Reallocation Dealer</TableHead>
-              <TableHead className="min-w-[150px]">Customer Name</TableHead>
-              <TableHead className="min-w-[180px]">Update</TableHead>
-              <TableHead className="min-w-[160px]">Year / Notes</TableHead>
-              <TableHead className="w-[110px] text-center">Dispatched</TableHead>
+              <TableHead className="w-16 h-10 px-3 py-2" aria-label="Row actions" />
+              <TableHead className="min-w-[140px] h-10 px-3 py-2 border-l border-slate-200/70">
+                Chassis No
+              </TableHead>
+              <TableHead className="min-w-[110px] h-10 px-3 py-2 border-l border-slate-200/70">
+                Model
+              </TableHead>
+              <TableHead className="min-w-[145px] h-10 px-3 py-2 border-l border-slate-200/70">
+                Scheduled Dealer
+              </TableHead>
+              <TableHead className="min-w-[155px] h-10 px-3 py-2 border-l border-slate-200/70">
+                Latest Reallocation Dealer
+              </TableHead>
+              <TableHead className="min-w-[140px] h-10 px-3 py-2 border-l border-slate-200/70">
+                Customer Name
+              </TableHead>
+              <TableHead className="min-w-[160px] h-10 px-3 py-2 border-l border-slate-200/70">
+                Update
+              </TableHead>
+              <TableHead className="min-w-[150px] h-10 px-3 py-2 border-l border-slate-200/70">
+                Year / Notes
+              </TableHead>
+              <TableHead className="w-[110px] h-10 px-3 py-2 text-center border-l border-slate-200/70">
+                Dispatched
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -506,7 +522,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                   key={row.id}
                   className={`${row.dispatched ? "bg-emerald-50" : ""} transition`}
                 >
-                  <TableCell className="align-top">
+                  <TableCell className="align-top px-3 py-2">
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
@@ -542,10 +558,10 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                       </Button>
                     </div>
                   </TableCell>
-                  <TableCell className="align-top font-semibold text-slate-800">
+                  <TableCell className="align-top font-semibold text-slate-800 px-3 py-2 border-l border-slate-200/70">
                     {row.chassisNo}
                   </TableCell>
-                  <TableCell className="align-top text-slate-700">
+                  <TableCell className="align-top text-slate-700 px-3 py-2 border-l border-slate-200/70">
                     {isEditing ? (
                       <Input
                         value={modelValue}
@@ -561,7 +577,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                       modelValue || "-"
                     )}
                   </TableCell>
-                  <TableCell className="align-top text-slate-700">
+                  <TableCell className="align-top text-slate-700 px-3 py-2 border-l border-slate-200/70">
                     {isEditing ? (
                       <Input
                         value={scheduledDealerValue}
@@ -577,7 +593,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                       scheduledDealerValue || "-"
                     )}
                   </TableCell>
-                  <TableCell className="align-top text-slate-700">
+                  <TableCell className="align-top text-slate-700 px-3 py-2 border-l border-slate-200/70">
                     {isEditing ? (
                       <Input
                         value={reallocatedDealerValue}
@@ -593,7 +609,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                       reallocatedDealerValue || "-"
                     )}
                   </TableCell>
-                  <TableCell className="align-top text-slate-700">
+                  <TableCell className="align-top text-slate-700 px-3 py-2 border-l border-slate-200/70">
                     {isEditing ? (
                       <Input
                         value={customerValue}
@@ -609,7 +625,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                       customerValue || "-"
                     )}
                   </TableCell>
-                  <TableCell className="align-top">
+                  <TableCell className="align-top px-3 py-2 border-l border-slate-200/70">
                     {isEditing ? (
                       <Input
                         value={updateValue}
@@ -626,7 +642,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                       <div className="text-slate-700">{updateValue || "-"}</div>
                     )}
                   </TableCell>
-                  <TableCell className="align-top">
+                  <TableCell className="align-top px-3 py-2 border-l border-slate-200/70">
                     {isEditing ? (
                       <Input
                         value={yearNotesValue}
@@ -643,7 +659,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                       <div className="text-slate-700">{yearNotesValue || "-"}</div>
                     )}
                   </TableCell>
-                  <TableCell className="align-top">
+                  <TableCell className="align-top px-3 py-2 border-l border-slate-200/70">
                     <div className="flex items-center justify-center">
                       <Button
                         size="sm"

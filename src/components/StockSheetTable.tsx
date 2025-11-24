@@ -176,7 +176,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
         dispatched,
         updatedAt: new Date().toISOString(),
       });
-      toast.success(dispatched ? "Marked as dispatched" : "Marked as pending");
+      toast.success(dispatched ? "dispatched" : "pending");
     } catch (error: any) {
       toast.error(error?.message || "Failed to update dispatched status");
     } finally {

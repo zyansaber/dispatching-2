@@ -101,8 +101,8 @@ const IndexPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6 overflow-x-hidden">
-      <div className="mx-auto w-full max-w-[1400px] space-y-6">
+    <div className="min-h-screen bg-white px-2 md:px-4 py-4 overflow-x-hidden">
+      <div className="w-full space-y-6">
         <header className="space-y-1">
           <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-gray-900">
             Dispatch Workspace

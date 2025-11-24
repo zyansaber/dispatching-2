@@ -94,3 +94,18 @@ export type ScheduleData = ScheduleEntry[];
  * ----------------------------- */
 
 export type DispatchData = Record<string, DispatchEntry>;
+
+/** ----------------------------
+ *  Dispatching Note（/dispatchingnote）类型
+ * ----------------------------- */
+
+export interface DispatchingNoteEntry {
+  chassisNo?: string;
+  update?: string;
+  yearNotes?: string;
+  dispatched?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type DispatchingNoteData = Record<string, DispatchingNoteEntry>;

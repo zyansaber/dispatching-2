@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -28,12 +28,24 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
   onDelete,
 }) => {
   const [newChassis, setNewChassis] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, { update?: string; yearNotes?: string }>>({});
+  const [drafts, setDrafts] = useState<
+    Record<
+      string,
+      {
+        update?: string;
+        yearNotes?: string;
+        model?: string;
+        scheduledDealer?: string;
+        reallocatedDealer?: string;
+        customerName?: string;
+      }
+    >
+  >({});
   const [hideDispatched, setHideDispatched] = useState(false);
   const [savingRow, setSavingRow] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const saveTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
   const findLatestReallocatedDealer = (chassisNo: string) => {
     const entries = reallocations[chassisNo];
@@ -114,17 +126,18 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
       .map(([key, value]) => {
         const chassisNo = value.chassisNo || key;
         const scheduleInfo = pickScheduleInfo(chassisNo);
-        const reallocatedDealer = findLatestReallocatedDealer(chassisNo);
+        const manualReallocated = value.reallocatedDealer || "";
+        const reallocatedDealer = manualReallocated || findLatestReallocatedDealer(chassisNo);
         return {
           id: key,
           chassisNo,
           update: value.update || "",
           yearNotes: value.yearNotes || "",
           dispatched: Boolean(value.dispatched),
-          scheduleModel: scheduleInfo.model || "",
-          scheduledDealer: scheduleInfo.scheduledDealer || "",
+          scheduleModel: value.model || scheduleInfo.model || "",
+          scheduledDealer: value.scheduledDealer || scheduleInfo.scheduledDealer || "",
           reallocatedDealer: reallocatedDealer || "",
-          customer: scheduleInfo.customerName || "",
+          customer: value.customerName || scheduleInfo.customerName || "",
         };
       })
       .sort((a, b) => a.chassisNo.localeCompare(b.chassisNo, undefined, { sensitivity: "base" }));
@@ -133,12 +146,6 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
   const visibleRows = hideDispatched
     ? processedRows.filter((row) => !row.dispatched)
     : processedRows;
-
-  useEffect(() => {
-    return () => {
-      Object.values(saveTimers.current).forEach((timer) => clearTimeout(timer));
-    };
-  }, []);
 
   const splitCsvLine = (line: string) => {
     const cells: string[] = [];
@@ -308,37 +315,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     }
   };
 
-  const queueSaveRow = (rowId: string, chassisNo: string, update?: string, yearNotes?: string) => {
-    const existing = saveTimers.current[rowId];
-    if (existing) clearTimeout(existing);
-
-    const timer = setTimeout(async () => {
-      setSavingRow(rowId);
-      try {
-        await onSave(chassisNo, {
-          chassisNo,
-          update: update ?? drafts[rowId]?.update ?? notes[rowId]?.update ?? "",
-          yearNotes: yearNotes ?? drafts[rowId]?.yearNotes ?? notes[rowId]?.yearNotes ?? "",
-          updatedAt: new Date().toISOString(),
-        });
-        toast.success("Saved");
-      } catch (error: any) {
-        toast.error(error?.message || "Failed to save row");
-      } finally {
-        setSavingRow(null);
-      }
-    }, 400);
-
-    saveTimers.current[rowId] = timer;
-  };
-
   const handleDeleteRow = async (rowId: string, chassisNo: string) => {
-    const pendingTimer = saveTimers.current[rowId];
-    if (pendingTimer) {
-      clearTimeout(pendingTimer);
-      delete saveTimers.current[rowId];
-    }
-
     setSavingRow(rowId);
     try {
       await onDelete(chassisNo);
@@ -347,9 +324,66 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
         delete next[rowId];
         return next;
       });
+      if (editingRowId === rowId) {
+        setEditingRowId(null);
+      }
       toast.success("Row deleted");
     } catch (error: any) {
       toast.error(error?.message || "Failed to delete row");
+    } finally {
+      setSavingRow(null);
+    }
+  };
+
+  const startEditingRow = (rowId: string, data: {
+    chassisNo: string;
+    update: string;
+    yearNotes: string;
+    scheduleModel: string;
+    scheduledDealer: string;
+    reallocatedDealer: string;
+    customer: string;
+  }) => {
+    setEditingRowId(rowId);
+    setDrafts((prev) => ({
+      ...prev,
+      [rowId]: {
+        update: data.update,
+        yearNotes: data.yearNotes,
+        model: data.scheduleModel,
+        scheduledDealer: data.scheduledDealer,
+        reallocatedDealer: data.reallocatedDealer,
+        customerName: data.customer,
+      },
+    }));
+  };
+
+  const saveEditedRow = async (rowId: string, chassisNo: string) => {
+    const draft = drafts[rowId] || {};
+    const current = processedRows.find((row) => row.id === rowId);
+    if (!current) return;
+
+    setSavingRow(rowId);
+    try {
+      await onSave(chassisNo, {
+        chassisNo,
+        update: draft.update ?? current.update ?? "",
+        yearNotes: draft.yearNotes ?? current.yearNotes ?? "",
+        model: draft.model ?? current.scheduleModel ?? "",
+        scheduledDealer: draft.scheduledDealer ?? current.scheduledDealer ?? "",
+        reallocatedDealer: draft.reallocatedDealer ?? current.reallocatedDealer ?? "",
+        customerName: draft.customerName ?? current.customer ?? "",
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success("Saved");
+      setEditingRowId(null);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to save row");
     } finally {
       setSavingRow(null);
     }
@@ -427,7 +461,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead className="w-10" aria-label="Delete" />
+              <TableHead className="w-16" aria-label="Row actions" />
               <TableHead className="min-w-[150px]">Chassis No</TableHead>
               <TableHead className="min-w-[120px]">Model</TableHead>
               <TableHead className="min-w-[160px]">Scheduled Dealer</TableHead>
@@ -449,9 +483,23 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
 
             {visibleRows.map((row) => {
               const draft = drafts[row.id] || {};
-              const updateValue = draft.update ?? row.update;
-              const yearNotesValue = draft.yearNotes ?? row.yearNotes;
               const isSaving = savingRow === row.id;
+              const isEditing = editingRowId === row.id;
+
+              const updateValue = isEditing ? draft.update ?? row.update : row.update;
+              const yearNotesValue = isEditing ? draft.yearNotes ?? row.yearNotes : row.yearNotes;
+              const modelValue = isEditing
+                ? draft.model ?? row.scheduleModel
+                : row.scheduleModel;
+              const scheduledDealerValue = isEditing
+                ? draft.scheduledDealer ?? row.scheduledDealer
+                : row.scheduledDealer;
+              const reallocatedDealerValue = isEditing
+                ? draft.reallocatedDealer ?? row.reallocatedDealer
+                : row.reallocatedDealer;
+              const customerValue = isEditing
+                ? draft.customerName ?? row.customer
+                : row.customer;
 
               return (
                 <TableRow
@@ -459,51 +507,141 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
                   className={`${row.dispatched ? "bg-emerald-50" : ""} transition`}
                 >
                   <TableCell className="align-top">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-slate-500 hover:text-red-600"
-                      onClick={() => handleDeleteRow(row.id, row.chassisNo)}
-                      disabled={isSaving}
-                      aria-label="Delete row"
-                    >
-                      ×
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-slate-500 hover:text-red-600"
+                        onClick={() => handleDeleteRow(row.id, row.chassisNo)}
+                        disabled={isSaving}
+                        aria-label="Delete row"
+                      >
+                        ×
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-slate-500 hover:text-blue-600"
+                        onClick={() =>
+                          isEditing
+                            ? saveEditedRow(row.id, row.chassisNo)
+                            : startEditingRow(row.id, {
+                                chassisNo: row.chassisNo,
+                                update: row.update,
+                                yearNotes: row.yearNotes,
+                                scheduleModel: row.scheduleModel,
+                                scheduledDealer: row.scheduledDealer,
+                                reallocatedDealer: row.reallocatedDealer,
+                                customer: row.customer,
+                              })
+                        }
+                        disabled={isSaving}
+                        aria-label={isEditing ? "Save row" : "Edit row"}
+                      >
+                        {isEditing ? "💾" : "✎"}
+                      </Button>
+                    </div>
                   </TableCell>
                   <TableCell className="align-top font-semibold text-slate-800">
                     {row.chassisNo}
                   </TableCell>
-                  <TableCell className="align-top text-slate-700">{row.scheduleModel || "-"}</TableCell>
-                  <TableCell className="align-top text-slate-700">{row.scheduledDealer || "-"}</TableCell>
-                  <TableCell className="align-top text-slate-700">{row.reallocatedDealer || "-"}</TableCell>
-                  <TableCell className="align-top text-slate-700">{row.customer || "-"}</TableCell>
-                  <TableCell className="align-top">
-                    <Input
-                      value={updateValue}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [row.id]: { ...prev[row.id], update: value },
-                        }));
-                        queueSaveRow(row.id, row.chassisNo, value, yearNotesValue);
-                      }}
-                      placeholder="Notes / follow up"
-                    />
+                  <TableCell className="align-top text-slate-700">
+                    {isEditing ? (
+                      <Input
+                        value={modelValue}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: { ...prev[row.id], model: e.target.value },
+                          }))
+                        }
+                        placeholder="Model"
+                      />
+                    ) : (
+                      modelValue || "-"
+                    )}
+                  </TableCell>
+                  <TableCell className="align-top text-slate-700">
+                    {isEditing ? (
+                      <Input
+                        value={scheduledDealerValue}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: { ...prev[row.id], scheduledDealer: e.target.value },
+                          }))
+                        }
+                        placeholder="Scheduled Dealer"
+                      />
+                    ) : (
+                      scheduledDealerValue || "-"
+                    )}
+                  </TableCell>
+                  <TableCell className="align-top text-slate-700">
+                    {isEditing ? (
+                      <Input
+                        value={reallocatedDealerValue}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: { ...prev[row.id], reallocatedDealer: e.target.value },
+                          }))
+                        }
+                        placeholder="Latest Reallocation Dealer"
+                      />
+                    ) : (
+                      reallocatedDealerValue || "-"
+                    )}
+                  </TableCell>
+                  <TableCell className="align-top text-slate-700">
+                    {isEditing ? (
+                      <Input
+                        value={customerValue}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: { ...prev[row.id], customerName: e.target.value },
+                          }))
+                        }
+                        placeholder="Customer Name"
+                      />
+                    ) : (
+                      customerValue || "-"
+                    )}
                   </TableCell>
                   <TableCell className="align-top">
-                    <Input
-                      value={yearNotesValue}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [row.id]: { ...prev[row.id], yearNotes: value },
-                        }));
-                        queueSaveRow(row.id, row.chassisNo, updateValue, value);
-                      }}
-                      placeholder="Year / other notes"
-                    />
+                    {isEditing ? (
+                      <Input
+                        value={updateValue}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: { ...prev[row.id], update: value },
+                          }));
+                        }}
+                        placeholder="Notes / follow up"
+                      />
+                    ) : (
+                      <div className="text-slate-700">{updateValue || "-"}</div>
+                    )}
+                  </TableCell>
+                  <TableCell className="align-top">
+                    {isEditing ? (
+                      <Input
+                        value={yearNotesValue}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: { ...prev[row.id], yearNotes: value },
+                          }));
+                        }}
+                        placeholder="Year / other notes"
+                      />
+                    ) : (
+                      <div className="text-slate-700">{yearNotesValue || "-"}</div>
+                    )}
                   </TableCell>
                   <TableCell className="align-top">
                     <div className="flex items-center justify-center">

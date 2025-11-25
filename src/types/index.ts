@@ -108,6 +108,7 @@ export interface DispatchingNoteEntry {
   scheduledDealer?: string;
   reallocatedDealer?: string;
   customerName?: string;
+  backgroundColor?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

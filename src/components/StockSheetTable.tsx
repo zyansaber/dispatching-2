@@ -39,6 +39,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
         scheduledDealer?: string;
         reallocatedDealer?: string;
         customerName?: string;
+        backgroundColor?: string;
       }
     >
   >({});
@@ -140,6 +141,7 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
           scheduledDealer: value.scheduledDealer || scheduleInfo.scheduledDealer || "",
           reallocatedDealer: reallocatedDealer || "",
           customer: value.customerName || scheduleInfo.customerName || "",
+          backgroundColor: value.backgroundColor ?? "",
         };
       })
       .sort((a, b) => a.chassisNo.localeCompare(b.chassisNo, undefined, { sensitivity: "base" }));
@@ -411,6 +413,22 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
     }
   };
 
+  const handleRowColorChange = async (rowId: string, chassisNo: string, color: string) => {
+    setSavingRow(rowId);
+    try {
+      await onSave(chassisNo, {
+        chassisNo,
+        backgroundColor: color || null,
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success(color ? "Row color updated" : "Row color cleared");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to update row color");
+    } finally {
+      setSavingRow(null);
+    }
+  };
+  
   return (
     <Card className="shadow-sm border-slate-200">
       <CardHeader className="flex flex-col gap-2 pb-4">
@@ -519,64 +537,87 @@ const StockSheetTable: React.FC<StockSheetTableProps> = ({
               const modelValue = isEditing
                 ? draft.model ?? row.scheduleModel
                 : row.scheduleModel;
-              const scheduledDealerValue = isEditing
-                ? draft.scheduledDealer ?? row.scheduledDealer
-                : row.scheduledDealer;
-              const reallocatedDealerValue = isEditing
-                ? draft.reallocatedDealer ?? row.reallocatedDealer
-                : row.reallocatedDealer;
-              const customerValue = isEditing
-                ? draft.customerName ?? row.customer
-                : row.customer;
+            const scheduledDealerValue = isEditing
+              ? draft.scheduledDealer ?? row.scheduledDealer
+              : row.scheduledDealer;
+            const reallocatedDealerValue = isEditing
+              ? draft.reallocatedDealer ?? row.reallocatedDealer
+              : row.reallocatedDealer;
+            const customerValue = isEditing
+              ? draft.customerName ?? row.customer
+              : row.customer;
+            const resolvedBackgroundColor = row.backgroundColor || undefined;
+            const colorPickerValue =
+              row.backgroundColor || (row.dispatched ? "#ecfdf3" : "#ffffff");
 
-              return (
-                <TableRow
-                  key={row.id}
-                  className={`${row.dispatched ? "bg-emerald-50" : ""} transition`}
-                >
-                  <TableCell className="align-top px-3 py-2">
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-slate-500 hover:text-red-600"
-                        onClick={() => handleDeleteRow(row.id, row.chassisNo)}
+            return (
+              <TableRow
+                key={row.id}
+                className={`${row.dispatched ? "bg-emerald-50" : ""} transition`}
+                style={{ backgroundColor: resolvedBackgroundColor }}
+              >
+                <TableCell className="align-top px-3 py-2">
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-slate-500 hover:text-red-600"
+                      onClick={() => handleDeleteRow(row.id, row.chassisNo)}
+                      disabled={isSaving}
+                      aria-label="Delete row"
+                    >
+                      ×
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-slate-500 hover:text-blue-600"
+                      onClick={() =>
+                        isEditing
+                          ? saveEditedRow(row.id, row.chassisNo)
+                          : startEditingRow(row.id, {
+                              chassisNo: row.chassisNo,
+                              update: row.update,
+                              yearNotes: row.yearNotes,
+                              scheduleModel: row.scheduleModel,
+                              scheduledDealer: row.scheduledDealer,
+                              reallocatedDealer: row.reallocatedDealer,
+                              customer: row.customer,
+                            })
+                      }
+                      disabled={isSaving}
+                      aria-label={isEditing ? "Save row" : "Edit row"}
+                    >
+                      {isEditing ? "💾" : "✎"}
+                    </Button>
+                    <label className="relative inline-flex items-center" aria-label="Choose row color">
+                      <input
+                        type="color"
+                        value={colorPickerValue}
+                        onChange={(e) => handleRowColorChange(row.id, row.chassisNo, e.target.value)}
                         disabled={isSaving}
-                        aria-label="Delete row"
-                      >
-                        ×
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-slate-500 hover:text-blue-600"
-                        onClick={() =>
-                          isEditing
-                            ? saveEditedRow(row.id, row.chassisNo)
-                            : startEditingRow(row.id, {
-                                chassisNo: row.chassisNo,
-                                update: row.update,
-                                yearNotes: row.yearNotes,
-                                scheduleModel: row.scheduleModel,
-                                scheduledDealer: row.scheduledDealer,
-                                reallocatedDealer: row.reallocatedDealer,
-                                customer: row.customer,
-                              })
-                        }
-                        disabled={isSaving}
-                        aria-label={isEditing ? "Save row" : "Edit row"}
-                      >
-                        {isEditing ? "💾" : "✎"}
-                      </Button>
-                    </div>
-                  </TableCell>
-                  <TableCell className="align-top font-semibold text-slate-800 px-3 py-2 border-l border-slate-200/70">
-                    {row.chassisNo}
-                  </TableCell>
-                  <TableCell className="align-top text-slate-700 px-3 py-2 border-l border-slate-200/70">
-                    {isEditing ? (
-                      <Input
-                        value={modelValue}
+                        className="h-8 w-8 cursor-pointer rounded border border-slate-200 bg-white p-1 shadow-sm"
+                      />
+                    </label>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-slate-500 hover:text-amber-600"
+                      onClick={() => handleRowColorChange(row.id, row.chassisNo, "")}
+                      disabled={isSaving || !row.backgroundColor}
+                      aria-label="Clear row color"
+                    >
+                      🧹
+                    </Button>
+                  </div>
+                </TableCell>
+                <TableCell className="align-top font-semibold text-slate-800 px-3 py-2 border-l border-slate-200/70">
+                  {row.chassisNo}
+                </TableCell>
+                <TableCell className="align-top text-slate-700 px-3 py-2 border-l border-slate-200/70">
+                  {isEditing ? (
+                    <Input
+                      value={modelValue}
                         onChange={(e) =>
                           setDrafts((prev) => ({
                             ...prev,

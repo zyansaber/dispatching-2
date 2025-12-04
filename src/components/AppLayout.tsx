@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { createContext, useContext, useMemo, useState } from 'react';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { ArrowLeftRight, Banknote, BarChart3, ChevronLeft, ChevronRight, Home, Menu, Truck, Warehouse } from 'lucide-react';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -7,6 +7,23 @@ import { Card } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { cn } from '@/lib/utils';
+
+type DashboardContextValue = {
+  dealer: string;
+  setDealer: (dealer: string) => void;
+  collapsed: boolean;
+  toggleSidebar: () => void;
+};
+
+const DashboardContext = createContext<DashboardContextValue | null>(null);
+
+export function useDashboardContext() {
+  const context = useContext(DashboardContext);
+  if (!context) {
+    throw new Error('useDashboardContext must be used within AppLayout');
+  }
+  return context;
+}
 
 const navItems = [
   { label: 'Dashboard', icon: Home, href: '/dashboard' },
@@ -29,7 +46,7 @@ type SidebarProps = {
   onDealerChange: (dealer: string) => void;
 };
 
-export default function Sidebar({ collapsed, onToggle, dealer, onDealerChange }: SidebarProps) {
+function Sidebar({ collapsed, onToggle, dealer, onDealerChange }: SidebarProps) {
   const location = useLocation();
 
   const activePath = useMemo(() => {
@@ -128,5 +145,36 @@ export default function Sidebar({ collapsed, onToggle, dealer, onDealerChange }:
         </Button>
       </div>
     </aside>
+  );
+}
+
+export default function AppLayout() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [dealer, setDealer] = useState('Cascade Auto Group');
+
+  const toggleSidebar = () => setCollapsed((prev) => !prev);
+
+  return (
+    <DashboardContext.Provider value={{ dealer, setDealer, collapsed, toggleSidebar }}>
+      <div className="flex min-h-screen bg-slate-50 text-slate-900">
+        <Sidebar collapsed={collapsed} onToggle={toggleSidebar} dealer={dealer} onDealerChange={setDealer} />
+        <main className="flex-1 overflow-auto">
+          <div className="border-b bg-white/80 backdrop-blur">
+            <div className="flex items-center justify-between px-6 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Command center</p>
+                <p className="text-lg font-semibold text-slate-900">Operations</p>
+              </div>
+              <Badge variant="outline" className="rounded-full px-3">
+                {collapsed ? 'Compact' : 'Expanded'}
+              </Badge>
+            </div>
+          </div>
+          <div className="p-6">
+            <Outlet />
+          </div>
+        </main>
+      </div>
+    </DashboardContext.Provider>
   );
 }

@@ -3,6 +3,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import AppLayout from '@/components/AppLayout';
 import DashboardPage from '@/pages/Dashboard';
+import DispatchPage from '@/pages/Dispatch';
 import FinancePage from '@/pages/Finance';
 import InventoryPage from '@/pages/Inventory';
 import LoginPage from '@/pages/Login';
@@ -17,7 +18,8 @@ const App = () => (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<AppLayout />}>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/dispatch" replace />} />
+          <Route path="/dispatch" element={<DispatchPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/yard" element={<YardPage />} />

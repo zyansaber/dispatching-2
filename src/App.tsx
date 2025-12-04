@@ -1,15 +1,29 @@
-import { Toaster } from '@/components/ui/sonner';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import Index from './pages/Index';
-import NotFound from './pages/NotFound';
+import { Toaster } from '@/components/ui/sonner';
+import AppLayout from '@/components/AppLayout';
+import DashboardPage from '@/pages/Dashboard';
+import FinancePage from '@/pages/Finance';
+import InventoryPage from '@/pages/Inventory';
+import LoginPage from '@/pages/Login';
+import NotFound from '@/pages/NotFound';
+import ReportsPage from '@/pages/Reports';
+import YardPage from '@/pages/Yard';
 
 const App = () => (
-  <TooltipProvider>
-    <Toaster />
+  <TooltipProvider delayDuration={100}>
+    <Toaster richColors closeButton />
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Index />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/yard" element={<YardPage />} />
+          <Route path="/finance" element={<FinancePage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+        </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
